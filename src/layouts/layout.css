@@ -1,0 +1,190 @@
+/* src/layouts/layout.css */
+
+.roll-app-shell {
+  display: flex;
+  min-height: 100vh;
+  background: #fff6d9; /* το κρεμ του dashboard */
+  font-family: "Manrope", system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
+}
+
+/* ───────── SIDEBAR ───────── */
+
+.roll-sidebar {
+  width: 280px;
+  background: #ffffff;
+  border-right: 1px solid #f3e4c5;
+  display: flex;
+  flex-direction: column;
+  padding: 20px 18px;
+  box-sizing: border-box;
+}
+
+/* header: logo + title + bell */
+.roll-sidebar-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.roll-sidebar-logo-block {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.roll-sidebar-logo {
+  width: 44px;
+  height: 44px;
+  border-radius: 16px;
+  background: #e8f5e9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 18px;
+  color: #1d7f3f;
+}
+
+.roll-sidebar-title-wrap {
+  display: flex;
+  flex-direction: column;
+}
+
+.roll-sidebar-title {
+  font-weight: 700;
+  font-size: 16px;
+  color: #222222;
+}
+
+.roll-sidebar-subtitle {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.roll-sidebar-bell {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: #9ca3af;
+  padding: 4px;
+}
+
+/* section label */
+.roll-sidebar-section-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #9ca3af;
+  margin-bottom: 8px;
+}
+
+/* nav list */
+.roll-sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 24px;
+}
+
+.roll-nav-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 999px;
+  font-size: 13px;
+  text-decoration: none;
+  color: #4b5563;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.roll-nav-link:hover {
+  background: #f3f4ff;
+  color: #111827;
+}
+
+.roll-nav-link-active {
+  background: #ffc733;
+  color: #111827;
+}
+
+.roll-nav-icon {
+  flex-shrink: 0;
+}
+
+/* user card at bottom */
+.roll-sidebar-user-card {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #fff6d9;
+}
+
+.roll-user-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  background: #f59e0b;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  color: #ffffff;
+  text-transform: lowercase;
+}
+
+.roll-user-texts {
+  display: flex;
+  flex-direction: column;
+}
+
+.roll-user-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.roll-user-role {
+  font-size: 11px;
+  color: #6b7280;
+}
+
+/* ───────── MAIN AREA ───────── */
+
+.roll-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.roll-main-inner {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 32px 40px;
+  box-sizing: border-box;
+}
+
+.roll-main-content {
+  width: 100%;
+  max-width: 1200px; /* εκεί κάθονται όμορφα τα cards */
+}
+
+/* responsive μικρότερο */
+@media (max-width: 1200px) {
+  .roll-sidebar {
+    width: 250px;
+  }
+
+  .roll-main-inner {
+    padding: 24px;
+  }
+}

@@ -1,0 +1,10 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Μπορείς να προσθέσεις έξτρα custom css από κάτω αν χρειαστεί */
+/* π.χ.
+body {
+  @apply bg-slate-50;
+}
+*/

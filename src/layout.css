@@ -1,0 +1,171 @@
+/* GLOBAL FONT (Manrope) */
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700&display=swap');
+
+body {
+  font-family: "Manrope", sans-serif;
+  margin: 0;
+  padding: 0;
+  background: #fff9e7;
+  color: #1f1f1f;
+}
+
+/* APP SHELL */
+.roll-app-shell {
+  display: flex;
+  height: 100vh;
+  width: 100%;
+  overflow: hidden;
+}
+
+/* SIDEBAR */
+.roll-sidebar {
+  width: 260px;
+  background: #0f1c2f;
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  padding: 22px 18px;
+}
+
+/* LOGO BLOCK */
+.roll-sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 32px;
+}
+
+.roll-sidebar-logo-block {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.roll-sidebar-logo img {
+  width: 42px;
+  height: 42px;
+  border-radius: 8px;
+}
+
+.roll-sidebar-title {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.roll-sidebar-subtitle {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+/* SIDEBAR NAV */
+.roll-sidebar-section-label {
+  margin: 10px 0 14px;
+  font-size: 12px;
+  font-weight: 600;
+  opacity: 0.6;
+}
+
+.roll-sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+
+.roll-nav-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  text-decoration: none;
+  color: #cbd5e1;
+  transition: 0.2s;
+}
+
+.roll-nav-link:hover {
+  background: #24344d;
+}
+
+.roll-nav-link-active {
+  background: #ffc733 !important;
+  color: #000;
+}
+
+.roll-nav-link-active .roll-nav-icon {
+  color: #000 !important;
+}
+
+/* BOTTOM USER */
+.roll-sidebar-user-card {
+  padding: 14px 10px;
+  margin-top: 16px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.roll-user-avatar {
+  width: 36px;
+  height: 36px;
+  background: #ffc733;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  color: #000;
+}
+
+.roll-user-texts {
+  display: flex;
+  flex-direction: column;
+  line-height: 14px;
+}
+
+.roll-user-name {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.roll-user-role {
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+/* MAIN AREA */
+.roll-main {
+  flex: 1;
+  display: flex;
+  background: #fff9e7;
+  overflow-y: auto;
+}
+
+.roll-main-inner {
+  width: 100%;
+  max-width: 1600px; /* FULL CENTER LAYOUT */
+  margin: 0 auto;
+  padding: 32px 48px; /* EVEN PADDING */
+}
+
+.roll-main-content {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+/* SUPPORT */
+.badge {
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.badge.green {
+  background: #d2f1d4;
+  color: #0b6c1f;
+}
