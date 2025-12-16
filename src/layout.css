@@ -1,5 +1,5 @@
 /* GLOBAL FONT (Manrope) */
-@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700&display=swap');
+@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700&display=swap");
 
 body {
   font-family: "Manrope", sans-serif;
@@ -57,6 +57,42 @@ body {
   opacity: 0.8;
 }
 
+/* 🔔 BELL (στο sidebar header) */
+.roll-sidebar-bell {
+  border: none;
+  outline: none;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  border-radius: 12px;
+  padding: 10px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.roll-sidebar-bell:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* ✅ MOBILE CLOSE BUTTON (X) */
+.roll-sidebar-close {
+  display: none; /* desktop: κρυφό */
+  border: none;
+  outline: none;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  border-radius: 12px;
+  padding: 10px;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+}
+
+.roll-sidebar-close:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
 /* SIDEBAR NAV */
 .roll-sidebar-section-label {
   margin: 10px 0 14px;
@@ -106,6 +142,12 @@ body {
   display: flex;
   align-items: center;
   gap: 12px;
+  border: none;
+  cursor: pointer;
+}
+
+.roll-sidebar-user-card:hover {
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .roll-user-avatar {
@@ -168,4 +210,124 @@ body {
 .badge.green {
   background: #d2f1d4;
   color: #0b6c1f;
+}
+
+/* =========================
+   MOBILE TOP BAR (ΝΕΟ)
+   ========================= */
+.roll-mobile-topbar {
+  display: none;
+}
+
+.roll-mobile-iconbtn {
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.roll-mobile-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.roll-mobile-logo {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  object-fit: contain;
+}
+
+.roll-mobile-brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 14px;
+  min-width: 0;
+}
+
+.roll-mobile-title {
+  font-weight: 800;
+  font-size: 13px;
+  color: #111827;
+}
+
+.roll-mobile-subtitle {
+  font-size: 11px;
+  color: #6b7280;
+}
+
+/* MOBILE OVERLAY (κλείνει sidebar με tap) */
+.roll-mobile-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 9998;
+}
+
+/* =========================
+   MOBILE SIDEBAR DRAWER
+   ========================= */
+@media (max-width: 768px) {
+  /* δείχνουμε topbar */
+  .roll-mobile-topbar {
+    display: flex;
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    background: #fff9e7;
+    padding: 12px 12px 10px;
+    gap: 10px;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid rgba(15, 28, 47, 0.08);
+  }
+
+  /* sidebar γίνεται drawer */
+  .roll-sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 280px;
+    z-index: 9999;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    padding-top: 18px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .roll-sidebar.mobile-open {
+    transform: translateX(0);
+  }
+
+  /* ✅ στο mobile: κρύβουμε το desktop bell για να μη φαίνεται 2 φορές */
+  .roll-sidebar-bell {
+    display: none;
+  }
+
+  /* ✅ στο mobile: δείχνουμε το X close */
+  .roll-sidebar-close {
+    display: inline-flex;
+  }
+
+  /* στο mobile δεν θες το “extra” margin/padding */
+  .roll-main {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .roll-main-inner {
+    padding: 16px 12px 24px;
+  }
+
+  /* spacing στο sidebar */
+  .roll-sidebar-header {
+    margin-bottom: 18px;
+  }
 }

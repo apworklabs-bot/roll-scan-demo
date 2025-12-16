@@ -1,14 +1,7 @@
 // src/Layout.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
-import {
-  BarChart3,
-  Wifi,
-  ScanLine,
-  BusFront,
-  FileText,
-  Bell,
-} from "lucide-react";
+import { BarChart3, Wifi, ScanLine, BusFront, Bell, Menu, X } from "lucide-react";
 
 import "./layout.css";
 import rollscanLogo from "./assets/rollscan-logo.png";
@@ -21,6 +14,15 @@ export default function Layout({ children }) {
   const navigate = useNavigate();
 
   const [unreadCount, setUnreadCount] = useState(0);
+
+  // ✅ MOBILE DRAWER
+  const [mobileOpen, setMobileOpen] = useState(false);
+
+  // close drawer on route change (mobile)
+  useEffect(() => {
+    setMobileOpen(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname]);
 
   const lastSeenIso = useMemo(() => {
     return localStorage.getItem(LAST_SEEN_KEY) || "1970-01-01T00:00:00.000Z";
@@ -100,10 +102,75 @@ export default function Layout({ children }) {
     navigate("/profile");
   }
 
+  function closeMobile() {
+    setMobileOpen(false);
+  }
+
+  function openMobile() {
+    setMobileOpen(true);
+  }
+
+  // helper: close drawer after clicking nav (mobile)
+  function navClass({ isActive }) {
+    return "roll-nav-link" + (isActive ? " roll-nav-link-active" : "");
+  }
+
   return (
     <div className="roll-app-shell">
+      {/* ✅ MOBILE TOP BAR (ONLY ON MOBILE) */}
+      <div className="roll-mobile-topbar">
+        <button
+          type="button"
+          className="roll-mobile-iconbtn"
+          onClick={openMobile}
+          aria-label="Open menu"
+        >
+          <Menu size={20} />
+        </button>
+
+        <div className="roll-mobile-brand">
+          <img src={rollscanLogo} alt="Roll Scan" className="roll-mobile-logo" />
+          <div className="roll-mobile-brand-text">
+            <div className="roll-mobile-title">Roll Scan</div>
+            <div className="roll-mobile-subtitle">ΠΑΡΟΥΣΙΟΛΟΓΙΟ</div>
+          </div>
+        </div>
+
+        <button
+          className="roll-mobile-iconbtn"
+          title="Ειδοποιήσεις"
+          onClick={handleBellClick}
+          type="button"
+          style={{ position: "relative" }}
+          aria-label="Notifications"
+        >
+          <Bell size={18} />
+          {unreadCount > 0 && (
+            <span
+              style={{
+                position: "absolute",
+                top: "-4px",
+                right: "-4px",
+                minWidth: "18px",
+                height: "18px",
+                padding: "0 5px",
+                borderRadius: "999px",
+                fontSize: "11px",
+                lineHeight: "18px",
+                fontWeight: 700,
+                background: "#EF4444",
+                color: "white",
+                boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+              }}
+            >
+              {unreadCount > 99 ? "99+" : unreadCount}
+            </span>
+          )}
+        </button>
+      </div>
+
       {/* SIDEBAR */}
-      <aside className="roll-sidebar">
+      <aside className={`roll-sidebar ${mobileOpen ? "mobile-open" : ""}`}>
         {/* TOP */}
         <div className="roll-sidebar-header">
           <div className="roll-sidebar-logo-block">
@@ -121,7 +188,17 @@ export default function Layout({ children }) {
             </div>
           </div>
 
-          {/* 🔔 BELL */}
+          {/* ✅ MOBILE CLOSE (ONLY ON MOBILE) */}
+          <button
+            type="button"
+            className="roll-sidebar-close"
+            onClick={closeMobile}
+            aria-label="Close menu"
+          >
+            <X size={18} />
+          </button>
+
+          {/* 🔔 BELL (DESKTOP) */}
           <button
             className="roll-sidebar-bell"
             title="Ειδοποιήσεις"
@@ -159,53 +236,34 @@ export default function Layout({ children }) {
 
         {/* NAV */}
         <nav className="roll-sidebar-nav">
-          <NavLink
-            to="/dashboard"
-            className={({ isActive }) =>
-              "roll-nav-link" + (isActive ? " roll-nav-link-active" : "")
-            }
-          >
+          <NavLink to="/dashboard" className={navClass} onClick={closeMobile}>
             <BarChart3 size={18} />
             <span>Dashboard</span>
           </NavLink>
 
           <NavLink
             to="/live-attendance"
-            className={({ isActive }) =>
-              "roll-nav-link" + (isActive ? " roll-nav-link-active" : "")
-            }
+            className={navClass}
+            onClick={closeMobile}
           >
             <Wifi size={18} />
             <span>Live Attendance</span>
           </NavLink>
 
-          <NavLink
-            to="/scanner"
-            className={({ isActive }) =>
-              "roll-nav-link" + (isActive ? " roll-nav-link-active" : "")
-            }
-          >
+          <NavLink to="/scanner" className={navClass} onClick={closeMobile}>
             <ScanLine size={18} />
             <span>Scanner</span>
           </NavLink>
 
-          <NavLink
-            to="/bus-payments"
-            className={({ isActive }) =>
-              "roll-nav-link" + (isActive ? " roll-nav-link-active" : "")
-            }
-          >
+          <NavLink to="/bus-payments" className={navClass} onClick={closeMobile}>
             <BusFront size={18} />
             <span>Πληρωμές Πεδίου</span>
           </NavLink>
 
-
-          {/* ✅ Keep this page, but removed the extra admin menus */}
           <NavLink
             to="/notifications-center"
-            className={({ isActive }) =>
-              "roll-nav-link" + (isActive ? " roll-nav-link-active" : "")
-            }
+            className={navClass}
+            onClick={closeMobile}
           >
             <Bell size={18} />
             <span>Ειδοποιήσεις</span>
@@ -216,7 +274,10 @@ export default function Layout({ children }) {
         <button
           type="button"
           className="roll-sidebar-user-card"
-          onClick={handleUserClick}
+          onClick={() => {
+            closeMobile();
+            handleUserClick();
+          }}
           style={{ textAlign: "left", width: "100%" }}
           title="Profile"
         >
@@ -227,6 +288,11 @@ export default function Layout({ children }) {
           </div>
         </button>
       </aside>
+
+      {/* ✅ OVERLAY (ONLY ON MOBILE WHEN OPEN) */}
+      {mobileOpen && (
+        <div className="roll-mobile-overlay" onClick={closeMobile} />
+      )}
 
       {/* MAIN */}
       <main className="roll-main">
