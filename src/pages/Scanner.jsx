@@ -1,295 +1,216 @@
 // src/pages/Scanner.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
+
 import {
-  QrCode,
+  PauseCircle,
+  PlayCircle,
+  Flashlight,
   Search,
-  RefreshCw,
-  AlertCircle,
-  Users,
-  Calendar,
-  MapPin,
-  ArrowRight,
   Wifi,
   WifiOff,
-  Flashlight,
-  FlashlightOff,
-  Volume2,
-  VolumeX,
-  Vibrate,
 } from "lucide-react";
+
+// ZXing
 import { BrowserMultiFormatReader } from "@zxing/browser";
 
-function clsx(...a) {
-  return a.filter(Boolean).join(" ");
-}
+/**
+ * SCANNER
+ * - Camera QR scan
+ * - Manual search
+ * - PAUSE ONLY when we successfully open ScanCard
+ */
 
-/** -----------------------------
- * PRO FEEL HELPERS (BEEP + HAPTIC)
- * ------------------------------ */
-function safeVibrate(pattern) {
-  try {
-    if (typeof navigator !== "undefined" && navigator.vibrate) {
-      navigator.vibrate(pattern);
-    }
-  } catch {}
-}
+const LAST_SEEN_KEY = "rollscan:lastSeenNotificationsAt"; // (αν το θες αλλού, άστο)
+const isUuid = (s) =>
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    String(s || "").trim()
+  );
 
-function beep({ freq = 880, ms = 110, volume = 0.18, type = "sine" } = {}) {
-  try {
-    const AudioCtx = window.AudioContext || window.webkitAudioContext;
-    if (!AudioCtx) return;
+function normalizeQr(raw) {
+  const s = String(raw || "").trim();
 
-    const ctx = new AudioCtx();
-    const o = ctx.createOscillator();
-    const g = ctx.createGain();
-
-    o.type = type;
-    o.frequency.setValueAtTime(freq, ctx.currentTime);
-    g.gain.setValueAtTime(volume, ctx.currentTime);
-
-    o.connect(g);
-    g.connect(ctx.destination);
-
-    o.start();
-
-    const stopAt = ctx.currentTime + ms / 1000;
-    o.stop(stopAt);
-
-    setTimeout(() => {
-      try {
-        o.disconnect();
-        g.disconnect();
-        ctx.close?.();
-      } catch {}
-    }, ms + 60);
-  } catch {
-    // ignore
+  // support P:<uuid> or plain uuid
+  if (s.startsWith("P:") && isUuid(s.slice(2))) {
+    return { participantId: s.slice(2), raw: s };
   }
+  if (isUuid(s)) {
+    return { participantId: s, raw: s };
+  }
+  return { participantId: null, raw: s };
+}
+
+function safeUpper(v) {
+  if (v === null || v === undefined) return "";
+  return String(v).toUpperCase();
 }
 
 export default function Scanner() {
   const navigate = useNavigate();
-  const location = useLocation();
 
-  const [trips, setTrips] = useState([]);
-  const [tripId, setTripId] = useState("");
-  const [loadingTrips, setLoadingTrips] = useState(false);
+  // ===== UI / state =====
+  const [info, setInfo] = useState("");
+  const [err, setErr] = useState("");
 
-  const [token, setToken] = useState("");
-  const [busyToken, setBusyToken] = useState(false);
+  const [online, setOnline] = useState(true);
 
+  // Trip selection (πρέπει να δένει με το δικό σου UI)
+  const [tripId, setTripId] = useState(""); // REQUIRED to open card
+
+  // Camera
+  const [cameraOn, setCameraOn] = useState(false);
+  const [cameraBusy, setCameraBusy] = useState(false);
+  const [flashOn, setFlashOn] = useState(false);
+
+  // Last scan debug
+  const [lastRaw, setLastRaw] = useState("");
+  const [lastExtracted, setLastExtracted] = useState("");
+
+  // Manual search
   const [q, setQ] = useState("");
   const [busySearch, setBusySearch] = useState(false);
   const [results, setResults] = useState([]);
 
-  const [err, setErr] = useState("");
-  const [info, setInfo] = useState("");
-
-  // ✅ DEBUG: show exactly what scanner reads (RAW / EXTRACTED / LEN)
-  const [lastScanRaw, setLastScanRaw] = useState("");
-  const [lastScanToken, setLastScanToken] = useState("");
-
-  // ONLINE / OFFLINE
-  const [online, setOnline] = useState(
-    typeof navigator !== "undefined" ? navigator.onLine : true
-  );
-
-  // CAMERA SCAN STATE
+  // ===== refs =====
   const videoRef = useRef(null);
   const readerRef = useRef(null);
-  const [cameraOn, setCameraOn] = useState(false);
-  const [cameraBusy, setCameraBusy] = useState(false);
 
-  // FLASH / TORCH
-  const [torchOn, setTorchOn] = useState(false);
+  // anti-spam / lock for QR (prevents many decodes)
+  const processingRef = useRef(false);
+  const lastTokenRef = useRef("");
+  const lastAtRef = useRef(0);
 
-  // PRO FEEL TOGGLES
-  const [soundOn, setSoundOn] = useState(true);
-  const [hapticOn, setHapticOn] = useState(true);
-
-  // ANTI DOUBLE-FIRE
-  const lastTokenRef = useRef({ token: "", ts: 0 });
-
-  // AUTO-RESUME: remember if camera should re-open when returning from ScanCard
-  const autoResumeRef = useRef(false);
-
-  // Manual section helpers
-  const manualWrapRef = useRef(null);
-  const manualInputRef = useRef(null);
-
-  const selectedTrip = useMemo(
-    () => trips.find((t) => t.id === tripId) || null,
-    [trips, tripId]
-  );
-
+  // ===== online/offline indicator =====
   useEffect(() => {
-    const onOn = () => setOnline(true);
-    const onOff = () => setOnline(false);
-    window.addEventListener("online", onOn);
-    window.addEventListener("offline", onOff);
+    function up() {
+      setOnline(true);
+    }
+    function down() {
+      setOnline(false);
+    }
+    window.addEventListener("online", up);
+    window.addEventListener("offline", down);
+    setOnline(navigator.onLine);
     return () => {
-      window.removeEventListener("online", onOn);
-      window.removeEventListener("offline", onOff);
+      window.removeEventListener("online", up);
+      window.removeEventListener("offline", down);
     };
   }, []);
 
-  async function loadTrips() {
-    setLoadingTrips(true);
-    setErr("");
-    try {
-      const { data, error } = await supabase
-        .from("trips")
-        .select("id, name, start_date")
-        .order("start_date", { ascending: false });
-
-      if (error) throw error;
-
-      const rows = Array.isArray(data) ? data : [];
-      setTrips(rows);
-
-      if (!tripId && rows.length > 0) setTripId(rows[0].id);
-    } catch (e) {
-      console.error(e);
-      setErr(e?.message || "ΣΦΑΛΜΑ ΦΟΡΤΩΣΗΣ ΕΚΔΡΟΜΩΝ");
-      setTrips([]);
-    } finally {
-      setLoadingTrips(false);
-    }
-  }
-
-  useEffect(() => {
-    loadTrips();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  function feedbackSuccess() {
-    if (hapticOn) safeVibrate([60, 40, 60]);
-    if (soundOn) beep({ freq: 940, ms: 95, type: "sine" });
-  }
-
-  function feedbackError() {
-    if (hapticOn) safeVibrate([80, 40, 80, 40, 80]);
-    if (soundOn) beep({ freq: 260, ms: 140, type: "square", volume: 0.14 });
-  }
-
-  // ✅ OPEN SCAN CARD (FULL SCREEN)
-  function goParticipant(tripIdToUse, participantId, scanMethod) {
-    const t = String(tripIdToUse || "").trim();
-    const p = String(participantId || "").trim();
-    if (!t || !p) return;
-
-    autoResumeRef.current = !!cameraOn;
-    stopCamera();
-
-    navigate(
-      `/scan-card?tripId=${encodeURIComponent(t)}&participantId=${encodeURIComponent(
-        p
-      )}`,
-      {
-        state: { scanMethod },
-        replace: true,
-      }
-    );
-  }
-
-  // ---------------------------------------------------------
-  // QR TOKEN LOOKUP
-  // ---------------------------------------------------------
-  async function handleToken(rawToken, scanMethod = "QR") {
-    const t = String(rawToken || "").trim();
-    if (!t) return;
-
-    // ✅ If already searching, do not start another lookup
-    if (busyToken) return;
-
+  // ===== open ScanCard (ONLY success triggers pause) =====
+  async function handleToken(extracted, source = "QR") {
     const now = Date.now();
-    if (
-      lastTokenRef.current.token === t &&
-      now - lastTokenRef.current.ts < 1500
-    ) {
+    const { participantId } = normalizeQr(extracted);
+
+    if (!participantId) {
+      setInfo("ΔΕΝ ΒΡΕΘΗΚΕ ΕΓΚΥΡΟ QR. ΔΟΚΙΜΑΣΕ MANUAL SEARCH.");
       return;
     }
-    lastTokenRef.current = { token: t, ts: now };
 
-    setErr("");
-    setInfo("");
-    setBusyToken(true);
+    // lock against noisy repeats
+    if (processingRef.current) return;
+    if (lastTokenRef.current === participantId && now - lastAtRef.current < 700)
+      return;
+
+    processingRef.current = true;
+    lastTokenRef.current = participantId;
+    lastAtRef.current = now;
 
     try {
+      setErr("");
+
+      if (!tripId) {
+        setErr("ΔΙΑΛΕΞΕ ΕΚΔΡΟΜΗ ΠΡΩΤΑ.");
+        return;
+      }
+
       const { data, error } = await supabase
         .from("participants")
         .select("id, trip_id")
-        .eq("qr_token", t)
-        .single();
+        .eq("id", participantId)
+        .eq("trip_id", tripId)
+        .maybeSingle();
 
       if (error) throw error;
 
-      feedbackSuccess();
+      if (!data?.id) {
+        setInfo(
+          "ΔΕΝ ΒΡΕΘΗΚΕ ΣΥΜΜΕΤΕΧΩΝ ΣΤΗΝ ΕΠΙΛΕΓΜΕΝΗ ΕΚΔΡΟΜΗ. ΔΟΚΙΜΑΣΕ MANUAL SEARCH."
+        );
+        return;
+      }
 
-      if (data?.trip_id && data.trip_id !== tripId) setTripId(data.trip_id);
+      // ✅ PAUSE ONLY HERE: we are opening card
+      stopCameraHard();
 
-      goParticipant(data.trip_id, data.id, scanMethod);
+      navigate(`/scan-card?tripId=${tripId}&participantId=${data.id}`, {
+        state: { scanMethod: source },
+      });
     } catch (e) {
       console.error("QR lookup error:", e);
-      feedbackError();
-      // ✅ keep camera ON; show clear error
-      setErr("ΔΕΝ ΒΡΕΘΗΚΕ ΕΓΚΥΡΟ QR. ΔΟΚΙΜΑΣΕ MANUAL SEARCH.");
+      setErr(e?.message || "ΣΦΑΛΜΑ QR LOOKUP");
     } finally {
-      setBusyToken(false);
+      processingRef.current = false;
     }
   }
 
-  // ---------------------------------------------------------
-  // CAMERA START/STOP (ZXING)
-  // ---------------------------------------------------------
-  async function startCamera() {
-    if (cameraOn || cameraBusy) return;
-    setErr("");
-    setInfo("");
-    setCameraBusy(true);
+  // ===== camera control =====
+  function stopCameraHard() {
+    setCameraOn(false);
+    setFlashOn(false);
 
     try {
-      if (!videoRef.current) throw new Error("NO VIDEO ELEMENT");
+      readerRef.current?.reset?.();
+    } catch {}
+
+    readerRef.current = null;
+
+    // also stop tracks if any
+    try {
+      const v = videoRef.current;
+      const stream = v?.srcObject;
+      if (stream && stream.getTracks) {
+        stream.getTracks().forEach((t) => t.stop());
+      }
+      if (v) v.srcObject = null;
+    } catch {}
+  }
+
+  async function startCamera() {
+    if (cameraBusy) return;
+    setCameraBusy(true);
+    setErr("");
+    setInfo("");
+
+    try {
+      // reset previous reader
+      try {
+        readerRef.current?.reset?.();
+      } catch {}
+      readerRef.current = null;
 
       const reader = new BrowserMultiFormatReader();
       readerRef.current = reader;
 
-      let deviceId;
-      try {
-        const devices = await BrowserMultiFormatReader.listVideoInputDevices();
-        const backCam =
-          devices.find((d) =>
-            String(d.label || "").toLowerCase().includes("back")
-          ) || devices[0];
-        deviceId = backCam?.deviceId;
-      } catch {
-        deviceId = undefined;
-      }
-
       setCameraOn(true);
 
+      // decode from video device (back camera preference handled by browser)
       await reader.decodeFromVideoDevice(
-        deviceId || undefined,
+        undefined,
         videoRef.current,
         (result, error) => {
-          if (result?.getText) {
-            const raw = String(result.getText() || "");
-            const text = raw.trim();
-            if (!text) return;
+          if (result) {
+            const raw = result.getText?.() ?? String(result);
+            const extracted = String(raw || "").trim();
 
-            const extracted = extractToken(text);
+            setLastRaw(raw);
+            setLastExtracted(extracted);
 
-            // ✅ UI debug (no console needed)
-            setLastScanRaw(text);
-            setLastScanToken(extracted);
-
-            // ✅ do NOT stop camera on decode
-            // stop only when we successfully open the card (inside goParticipant)
+            // ✅ DO NOT STOP camera here
             handleToken(extracted, "QR");
           } else if (error) {
-            // ignore ZXing noise
+            // ignore zxing noise
           }
         }
       );
@@ -297,113 +218,53 @@ export default function Scanner() {
       setInfo("ΚΑΜΕΡΑ ΕΝΕΡΓΗ. ΣΤΟΧΕΥΣΕ ΣΤΟ QR.");
     } catch (e) {
       console.error(e);
-      feedbackError();
-      setErr(
-        "ΔΕΝ ΑΝΟΙΞΕ Η ΚΑΜΕΡΑ. ΕΛΕΓΞΕ PERMISSIONS / HTTPS (Η ΣΤΟ LOCALHOST)."
-      );
-      setCameraOn(false);
-      try {
-        readerRef.current?.reset?.();
-      } catch {}
-      readerRef.current = null;
+      setErr("ΔΕΝ ΑΝΟΙΞΕ Η ΚΑΜΕΡΑ. ΕΛΕΓΞΕ PERMISSIONS / HTTPS.");
+      stopCameraHard();
     } finally {
       setCameraBusy(false);
     }
   }
 
-  function stopCamera() {
-    try {
-      readerRef.current?.reset?.();
-    } catch {}
-    readerRef.current = null;
-    setCameraOn(false);
-    setCameraBusy(false);
-    setTorchOn(false);
+  function toggleCamera() {
+    if (cameraOn) {
+      stopCameraHard();
+    } else {
+      startCamera();
+    }
   }
 
-  async function toggleTorch(next) {
+  // ===== flash (best-effort, depends on device) =====
+  async function toggleFlash() {
     try {
-      const video = videoRef.current;
-      const stream = video?.srcObject;
+      const v = videoRef.current;
+      const stream = v?.srcObject;
       const track = stream?.getVideoTracks?.()?.[0];
       if (!track) return;
 
       const caps = track.getCapabilities?.();
-      if (!caps?.torch) {
-        setErr("FLASH ΔΕΝ ΥΠΟΣΤΗΡΙΖΕΤΑΙ ΣΕ ΑΥΤΗ ΤΗ ΣΥΣΚΕΥΗ.");
-        return;
-      }
+      if (!caps?.torch) return;
 
-      await track.applyConstraints({ advanced: [{ torch: !!next }] });
-      setTorchOn(!!next);
-    } catch {
-      setErr("FLASH ΔΕΝ ΕΝΕΡΓΟΠΟΙΗΘΗΚΕ.");
+      const next = !flashOn;
+      await track.applyConstraints({ advanced: [{ torch: next }] });
+      setFlashOn(next);
+    } catch (e) {
+      console.warn("flash not supported", e);
     }
   }
 
-  useEffect(() => {
-    return () => stopCamera();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  function extractToken(text) {
-    const s = String(text || "").trim();
-
-    // md5-like token
-    if (/^[a-f0-9]{32}$/i.test(s)) return s;
-
-    // uuid-like token (if ever used)
-    if (
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-        s
-      )
-    ) {
-      return s;
-    }
-
-    // URL params: token / qr_token / t
-    try {
-      const url = new URL(s);
-      const t1 = url.searchParams.get("token");
-      const t2 = url.searchParams.get("qr_token");
-      const t3 = url.searchParams.get("t");
-      if (t1) return String(t1).trim();
-      if (t2) return String(t2).trim();
-      if (t3) return String(t3).trim();
-
-      // path last segment
-      const parts = String(url.pathname || "")
-        .split("/")
-        .filter(Boolean);
-      const last = parts[parts.length - 1];
-      if (last && last.length >= 6) return String(last).trim();
-    } catch {
-      const m =
-        s.match(/(?:token|qr_token|t)=([a-zA-Z0-9_-]+)/) ||
-        s.match(/\/([a-f0-9]{32})$/i);
-      if (m?.[1]) return String(m[1]).trim();
-    }
-
-    return s;
-  }
-
-  // ---------------------------------------------------------
-  // MANUAL SEARCH (within selected trip)
-  // ---------------------------------------------------------
-  async function handleSearch() {
-    const qq = String(q || "").trim();
+  // ===== manual search =====
+  async function doSearch() {
+    const qq = q.trim();
+    if (!qq) return;
     if (!tripId) {
-      setErr("ΕΠΙΛΕΞΕ ΕΚΔΡΟΜΗ ΠΡΩΤΑ.");
-      return;
-    }
-    if (qq.length < 2) {
-      setErr("ΓΡΑΨΕ ΤΟΥΛΑΧΙΣΤΟΝ 2 ΧΑΡΑΚΤΗΡΕΣ.");
+      setErr("ΔΙΑΛΕΞΕ ΕΚΔΡΟΜΗ ΠΡΩΤΑ.");
       return;
     }
 
+    setBusySearch(true);
     setErr("");
     setInfo("");
-    setBusySearch(true);
+    setResults([]);
 
     try {
       const or = [
@@ -429,7 +290,6 @@ export default function Scanner() {
       if (rows.length === 0) setInfo("ΔΕΝ ΒΡΕΘΗΚΑΝ ΑΠΟΤΕΛΕΣΜΑΤΑ.");
     } catch (e) {
       console.error("search error:", e);
-      feedbackError();
       setErr(e?.message || "ΣΦΑΛΜΑ ΑΝΑΖΗΤΗΣΗΣ");
       setResults([]);
     } finally {
@@ -437,423 +297,228 @@ export default function Scanner() {
     }
   }
 
-  function openManual() {
-    stopCamera();
-    setTimeout(() => {
-      manualWrapRef.current?.scrollIntoView?.({
-        behavior: "smooth",
-        block: "start",
-      });
-      setTimeout(() => {
-        manualInputRef.current?.focus?.();
-      }, 180);
-    }, 50);
+  function openFromManual(row) {
+    if (!row?.id) return;
+    // ✅ PAUSE ONLY when opening card
+    stopCameraHard();
+    navigate(`/scan-card?tripId=${tripId}&participantId=${row.id}`, {
+      state: { scanMethod: "MANUAL" },
+    });
   }
 
-  // ---------------------------------------------------------
-  // ✅ AUTO-RESUME CAMERA when coming back from ScanCard
-  // ---------------------------------------------------------
-  useEffect(() => {
-    const wantsResume = !!location.state?.resume;
-
-    if (wantsResume) {
-      setErr("");
-      setInfo("");
-      setToken("");
-      setQ("");
-      setResults([]);
-
-      navigate("/scanner", { replace: true, state: {} });
-
-      const shouldResume = autoResumeRef.current || wantsResume;
-
-      if (shouldResume) {
-        setTimeout(() => {
-          startCamera();
-        }, 120);
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.key]);
+  // ===== UI =====
+  const lastLen = useMemo(() => String(lastExtracted || "").length, [lastExtracted]);
 
   return (
-    <div
-      className="fixed inset-0 bg-slate-50"
-      style={{
-        height: "100svh",
-        width: "100vw",
-        overflow: "hidden",
-        WebkitOverflowScrolling: "touch",
-      }}
-    >
-      <div
-        className="h-full overflow-y-auto"
-        style={{
-          paddingBottom: "calc(92px + env(safe-area-inset-bottom))",
-        }}
-      >
-        <div className="w-full max-w-none mx-auto px-3 pt-3">
-          {/* Header */}
-          <div className="flex items-start justify-between gap-3 mb-3">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-full bg-slate-900 flex items-center justify-center">
-                <QrCode className="w-5 h-5 text-white" />
-              </div>
-              <div>
-                <div className="text-[11px] font-semibold tracking-wide text-slate-500">
-                  SCAN / SEARCH
-                </div>
-                <div className="text-lg font-bold text-slate-900">SCANNER</div>
-                <div className="text-[11px] text-slate-500">
-                  CAMERA QR → SCAN CARD
-                </div>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={loadTrips}
-              className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-[11px] font-semibold text-slate-900 hover:bg-slate-50"
-              title="ΑΝΑΝΕΩΣΗ"
-            >
-              <RefreshCw
-                className={clsx("w-4 h-4", loadingTrips && "animate-spin")}
-              />
-              ΑΝΑΝΕΩΣΗ
-            </button>
+    <div className="min-h-[100dvh] w-full bg-[#FFF7E6]">
+      <div className="max-w-5xl mx-auto px-3 py-4 md:px-6 md:py-6">
+        {/* TOP HEADER */}
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div className="text-sm font-extrabold text-slate-900">
+            CAMERA QR → SCAN CARD
           </div>
 
-          {/* Errors / info */}
-          {err ? (
-            <div className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-800 flex items-center gap-2">
-              <AlertCircle className="w-4 h-4" />
-              <span>{err}</span>
+          <div
+            className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-extrabold ${
+              online
+                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                : "bg-rose-50 text-rose-700 border-rose-200"
+            }`}
+          >
+            {online ? <Wifi className="w-4 h-4" /> : <WifiOff className="w-4 h-4" />}
+            {online ? "ONLINE" : "OFFLINE"}
+          </div>
+        </div>
+
+        {/* ERR / INFO */}
+        {err ? (
+          <div className="mb-3 rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-[12px] font-bold text-rose-800">
+            {err}
+          </div>
+        ) : null}
+
+        {info ? (
+          <div className="mb-3 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-[12px] font-bold text-slate-700">
+            {info}
+          </div>
+        ) : null}
+
+        {/* LAST SCAN DEBUG */}
+        <div className="mb-3 rounded-2xl border border-slate-200 bg-white px-3 py-2">
+          <div className="text-[12px] font-extrabold text-slate-700">LAST SCAN</div>
+          <div className="mt-1 text-[12px] text-slate-600">
+            RAW: <span className="font-mono">"{lastRaw || "—"}"</span>
+          </div>
+          <div className="mt-1 text-[12px] text-slate-600">
+            EXTRACTED: <span className="font-mono">"{lastExtracted || "—"}"</span>{" "}
+            <span className="text-slate-400">(LEN={lastLen})</span>
+          </div>
+        </div>
+
+        {/* TRIP PICKER (simple input εδώ, βάλε το δικό σου dropdown) */}
+        <div className="mb-3 rounded-2xl border border-slate-200 bg-white px-3 py-3">
+          <div className="text-[11px] font-extrabold tracking-wide text-slate-600 mb-1">
+            ΕΚΔΡΟΜΗ (TRIP ID)
+          </div>
+          <input
+            value={tripId}
+            onChange={(e) => setTripId(e.target.value)}
+            placeholder="PASTE TRIP UUID"
+            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+          />
+          <div className="mt-1 text-[11px] text-slate-400">
+            (Αν έχεις dropdown, αντικατέστησε αυτό με το δικό σου.)
+          </div>
+        </div>
+
+        {/* SCAN AREA */}
+        <div className="rounded-3xl border border-slate-200 bg-white overflow-hidden">
+          <div className="px-3 py-2 border-b border-slate-200 flex items-center justify-between">
+            <div className="text-[12px] font-extrabold text-slate-700">SCAN</div>
+            <div className="text-[12px] font-extrabold text-slate-500">
+              {cameraOn ? "ΚΑΜΕΡΑ ON" : "ΚΑΜΕΡΑ OFF"}
             </div>
-          ) : null}
-
-          {info ? (
-            <div className="mb-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] text-emerald-800">
-              {info}
-            </div>
-          ) : null}
-
-          {/* ✅ DEBUG LAST SCAN */}
-          {(lastScanRaw || lastScanToken) ? (
-            <div className="mb-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-700">
-              <div className="font-extrabold text-slate-600 mb-1">LAST SCAN</div>
-              <div className="break-all">
-                RAW:{" "}
-                <span className="font-semibold">
-                  {JSON.stringify(lastScanRaw)}
-                </span>
-              </div>
-              <div className="break-all">
-                EXTRACTED:{" "}
-                <span className="font-semibold">
-                  {JSON.stringify(lastScanToken)}
-                </span>{" "}
-                <span className="text-slate-500">
-                  (LEN={String(lastScanToken || "").length})
-                </span>
-              </div>
-            </div>
-          ) : null}
-
-          {/* Trip select */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-4 mb-3">
-            <div className="flex items-center justify-between gap-3 mb-2">
-              <div className="text-[11px] font-extrabold tracking-wide text-slate-600">
-                ΕΚΔΡΟΜΗ
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setSoundOn((s) => !s)}
-                  className={clsx(
-                    "inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-bold border bg-white",
-                    soundOn
-                      ? "border-slate-200 text-slate-700"
-                      : "border-slate-200 text-slate-400"
-                  )}
-                  title="SOUND"
-                >
-                  {soundOn ? (
-                    <Volume2 className="w-4 h-4" />
-                  ) : (
-                    <VolumeX className="w-4 h-4" />
-                  )}
-                  {soundOn ? "SOUND ON" : "MUTE"}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setHapticOn((h) => !h)}
-                  className={clsx(
-                    "inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-bold border bg-white",
-                    hapticOn
-                      ? "border-slate-200 text-slate-700"
-                      : "border-slate-200 text-slate-400"
-                  )}
-                  title="HAPTIC"
-                >
-                  <Vibrate className="w-4 h-4" />
-                  {hapticOn ? "HAPTIC ON" : "HAPTIC OFF"}
-                </button>
-
-                <div
-                  className={clsx(
-                    "inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-bold border",
-                    online
-                      ? "bg-emerald-50 border-emerald-200 text-emerald-800"
-                      : "bg-amber-50 border-amber-200 text-amber-800"
-                  )}
-                >
-                  {online ? (
-                    <Wifi className="w-4 h-4" />
-                  ) : (
-                    <WifiOff className="w-4 h-4" />
-                  )}
-                  {online ? "ONLINE" : "OFFLINE"}
-                </div>
-              </div>
-            </div>
-
-            <select
-              value={tripId}
-              onChange={(e) => {
-                setTripId(e.target.value);
-                setResults([]);
-                setErr("");
-                setInfo("");
-              }}
-              disabled={loadingTrips}
-              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs"
-            >
-              {trips.length === 0 ? (
-                <option value="">— ΔΕΝ ΥΠΑΡΧΟΥΝ ΕΚΔΡΟΜΕΣ —</option>
-              ) : null}
-              {trips.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name || t.id}
-                </option>
-              ))}
-            </select>
-
-            {selectedTrip ? (
-              <div className="mt-2 text-[11px] text-slate-600 flex flex-wrap gap-3">
-                <span className="inline-flex items-center gap-1">
-                  <MapPin className="w-3 h-3" />
-                  {String(selectedTrip.name || "").toUpperCase()}
-                </span>
-                <span className="inline-flex items-center gap-1">
-                  <Calendar className="w-3 h-3" />
-                  {selectedTrip.start_date
-                    ? String(selectedTrip.start_date).slice(0, 10)
-                    : ""}
-                </span>
-              </div>
-            ) : null}
           </div>
 
-          {/* CAMERA SCAN */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-3 mb-3 overflow-hidden">
-            <div className="flex items-center justify-between gap-3 px-1">
-              <div className="text-[11px] font-extrabold tracking-wide text-slate-600">
-                SCAN
-              </div>
-
-              <div className="text-[11px] text-slate-500">
-                {cameraOn ? "ΚΑΜΕΡΑ ON" : "ΚΑΜΕΡΑ OFF"}
-              </div>
-            </div>
-
-            <div className="mt-3 rounded-2xl overflow-hidden border border-slate-200 bg-slate-900 relative">
+          <div className="p-3">
+            <div
+              className="relative w-full overflow-hidden rounded-2xl border border-slate-200"
+              style={{ background: "#0f1c2f" }}
+            >
               <video
                 ref={videoRef}
-                className="w-full h-[68vh] object-cover"
+                style={{
+                  width: "100%",
+                  height: "420px",
+                  objectFit: "cover",
+                }}
                 muted
                 playsInline
-                autoPlay
-              />
-              <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                <div className="w-[78%] max-w-[360px] aspect-square rounded-2xl border border-white/30" />
-              </div>
-            </div>
-
-            <div className="mt-2 text-[11px] text-slate-500">
-              ΑΝ ΔΕΝ ΑΝΟΙΓΕΙ: ΘΕΛΕΙ HTTPS (Η LOCALHOST) + ALLOW CAMERA.
-            </div>
-          </div>
-
-          {/* QR Token lookup (fallback) */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-4 mb-3">
-            <div className="text-[11px] font-extrabold tracking-wide text-slate-600 mb-2">
-              QR LOOKUP (PASTE TOKEN)
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <input
-                value={token}
-                onChange={(e) => setToken(e.target.value)}
-                placeholder="ΕΠΑΛΗΘΕΥΣΗ / PASTE QR TOKEN..."
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs"
               />
 
-              <button
-                type="button"
-                onClick={() => handleToken(token, "QR")}
-                disabled={busyToken}
-                className={clsx(
-                  "inline-flex items-center justify-center gap-2 rounded-lg px-4 py-3 text-xs font-extrabold",
-                  busyToken
-                    ? "bg-slate-200 text-slate-500 cursor-not-allowed"
-                    : "bg-slate-900 text-white hover:bg-slate-800"
-                )}
+              {/* simple framing */}
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  display: "grid",
+                  placeItems: "center",
+                  pointerEvents: "none",
+                }}
               >
-                <ArrowRight className="w-4 h-4" />
-                ΑΝΟΙΓΜΑ
-              </button>
-            </div>
-          </div>
-
-          {/* Manual search */}
-          <div
-            ref={manualWrapRef}
-            className="bg-white rounded-2xl border border-slate-200 p-4"
-          >
-            <div className="text-[11px] font-extrabold tracking-wide text-slate-600 mb-2">
-              MANUAL SEARCH (ΟΝΟΜΑ / ΤΗΛΕΦΩΝΟ / EMAIL / BUS)
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center gap-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-3">
-                <Search className="w-4 h-4 text-slate-400" />
-                <input
-                  ref={manualInputRef}
-                  value={q}
-                  onChange={(e) => setQ(e.target.value)}
-                  placeholder="ΑΝΑΖΗΤΗΣΗ..."
-                  className="flex-1 text-xs outline-none border-0 bg-transparent"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleSearch();
+                <div
+                  style={{
+                    width: "70%",
+                    maxWidth: 340,
+                    aspectRatio: "1/1",
+                    borderRadius: 24,
+                    border: "2px solid rgba(255,255,255,0.25)",
+                    boxShadow: "0 10px 40px rgba(0,0,0,0.25)",
                   }}
                 />
               </div>
+            </div>
+          </div>
+        </div>
+
+        {/* BOTTOM BAR */}
+        <div
+          className="fixed left-0 right-0 bottom-0 z-40"
+          style={{ paddingBottom: "max(12px, env(safe-area-inset-bottom))" }}
+        >
+          <div className="max-w-5xl mx-auto px-3">
+            <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-2 flex gap-2">
+              <button
+                type="button"
+                onClick={toggleCamera}
+                disabled={cameraBusy}
+                className={`flex-1 rounded-2xl px-4 py-3 text-sm font-extrabold border ${
+                  cameraOn
+                    ? "bg-slate-900 text-white border-slate-900"
+                    : "bg-white text-slate-900 border-slate-200"
+                }`}
+              >
+                {cameraOn ? (
+                  <span className="inline-flex items-center justify-center gap-2">
+                    <PauseCircle className="w-5 h-5" /> PAUSE
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center justify-center gap-2">
+                    <PlayCircle className="w-5 h-5" /> RESUME
+                  </span>
+                )}
+              </button>
 
               <button
                 type="button"
-                onClick={handleSearch}
-                disabled={busySearch}
-                className={clsx(
-                  "rounded-lg px-4 py-3 text-xs font-extrabold",
-                  busySearch
-                    ? "bg-slate-200 text-slate-500 cursor-not-allowed"
-                    : "bg-white text-slate-900 border border-slate-200 hover:bg-slate-50"
-                )}
+                onClick={toggleFlash}
+                className="flex-1 rounded-2xl px-4 py-3 text-sm font-extrabold border border-slate-200 bg-white text-slate-900 disabled:opacity-50"
               >
-                {busySearch ? "..." : "ΑΝΑΖΗΤΗΣΗ"}
+                <span className="inline-flex items-center justify-center gap-2">
+                  <Flashlight className="w-5 h-5" /> FLASH
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={doSearch}
+                disabled={busySearch}
+                className="flex-1 rounded-2xl px-4 py-3 text-sm font-extrabold border border-slate-200 bg-white text-slate-900"
+              >
+                <span className="inline-flex items-center justify-center gap-2">
+                  <Search className="w-5 h-5" /> MANUAL
+                </span>
               </button>
             </div>
+          </div>
+        </div>
 
-            {/* Results */}
-            <div className="mt-3 space-y-2">
-              {results.length > 0 ? (
-                <div className="text-[11px] text-slate-500 inline-flex items-center gap-2">
-                  <Users className="w-4 h-4" />
-                  ΑΠΟΤΕΛΕΣΜΑΤΑ: {results.length}
-                </div>
-              ) : null}
-
-              {results.map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => goParticipant(p.trip_id || tripId, p.id, "MANUAL")}
-                  className="w-full text-left rounded-xl border border-slate-200 bg-white hover:bg-slate-50 px-3 py-2"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-sm font-extrabold text-slate-900 truncate">
-                        {p.full_name || "ΧΩΡΙΣ ΟΝΟΜΑ"}
-                      </div>
-                      <div className="mt-1 text-[11px] text-slate-600 flex flex-wrap gap-3">
-                        {p.phone ? <span>ΤΗΛ: {p.phone}</span> : null}
-                        {p.email ? <span>EMAIL: {p.email}</span> : null}
-                        {p.bus_code ? (
-                          <span>BUS: {String(p.bus_code).toUpperCase()}</span>
-                        ) : null}
-                        {p.boarding_point ? (
-                          <span>
-                            ΑΦΕΤΗΡΙΑ: {String(p.boarding_point).toUpperCase()}
-                          </span>
-                        ) : null}
-                      </div>
-                    </div>
-
-                    <span className="px-3 py-1 rounded-full text-[10px] font-bold bg-slate-900 text-white">
-                      OK
-                    </span>
-                  </div>
-                </button>
-              ))}
-
-              {results.length === 0 ? (
-                <div className="text-[11px] text-slate-500">
-                  ΓΡΑΨΕ ΚΑΤΙ ΚΑΙ ΚΑΝΕ ΑΝΑΖΗΤΗΣΗ (Η ΠΡΟΣΠΑΘΗΣΕ PASTE TOKEN).
-                </div>
-              ) : null}
-            </div>
+        {/* MANUAL SEARCH PANEL */}
+        <div className="mt-4 rounded-3xl border border-slate-200 bg-white p-4 pb-24">
+          <div className="text-[12px] font-extrabold text-slate-700">
+            MANUAL SEARCH (ΟΝΟΜΑ / ΤΗΛΕΦΩΝΟ / EMAIL / BUS)
           </div>
 
-          <div className="h-4" />
-        </div>
-      </div>
+          <div className="mt-2 flex gap-2">
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="ΓΡΑΨΕ ΚΑΤΙ"
+              className="flex-1 rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm outline-none"
+            />
+            <button
+              type="button"
+              onClick={doSearch}
+              disabled={busySearch}
+              className="rounded-2xl border border-slate-200 bg-slate-900 text-white px-4 py-3 text-sm font-extrabold"
+            >
+              ΑΝΑΖΗΤΗΣΗ
+            </button>
+          </div>
 
-      {/* ✅ MOBILE BOTTOM CONTROLS (fixed) */}
-      <div
-        className="fixed left-0 right-0 z-50 bg-white border-t border-slate-200"
-        style={{ bottom: 0, paddingBottom: "env(safe-area-inset-bottom)" }}
-      >
-        <div className="px-3 py-3 grid grid-cols-3 gap-2">
-          <button
-            type="button"
-            onClick={() => (cameraOn ? stopCamera() : startCamera())}
-            className={clsx(
-              "rounded-xl py-3 text-[12px] font-extrabold border",
-              cameraOn
-                ? "bg-slate-900 text-white border-slate-900"
-                : "bg-white text-slate-900 border-slate-200"
-            )}
-          >
-            {cameraOn ? "PAUSE" : "RESUME"}
-          </button>
-
-          <button
-            type="button"
-            disabled={!cameraOn}
-            onClick={() => toggleTorch(!torchOn)}
-            className={clsx(
-              "rounded-xl py-3 text-[12px] font-extrabold border border-slate-200 bg-white inline-flex items-center justify-center gap-2",
-              !cameraOn && "opacity-50 cursor-not-allowed"
-            )}
-          >
-            {torchOn ? (
-              <FlashlightOff className="w-4 h-4" />
-            ) : (
-              <Flashlight className="w-4 h-4" />
-            )}
-            FLASH
-          </button>
-
-          <button
-            type="button"
-            onClick={openManual}
-            className="rounded-xl py-3 text-[12px] font-extrabold border border-slate-200 bg-white inline-flex items-center justify-center gap-2"
-          >
-            <Search className="w-4 h-4" />
-            MANUAL
-          </button>
+          {results.length > 0 ? (
+            <ul className="mt-3 divide-y divide-slate-100">
+              {results.map((r) => (
+                <li key={r.id} className="py-3">
+                  <button
+                    type="button"
+                    onClick={() => openFromManual(r)}
+                    className="w-full text-left rounded-2xl border border-slate-200 bg-white px-3 py-3"
+                  >
+                    <div className="text-sm font-extrabold text-slate-900">
+                      {safeUpper(r.full_name || "—")}
+                    </div>
+                    <div className="mt-1 text-[12px] text-slate-600">
+                      {r.phone || "—"} • {r.email || "—"}
+                    </div>
+                    <div className="mt-1 text-[12px] text-slate-400">
+                      ID: {String(r.id).slice(0, 8)}…
+                    </div>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </div>
       </div>
     </div>
