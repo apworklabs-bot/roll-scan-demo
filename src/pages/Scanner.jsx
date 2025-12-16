@@ -158,9 +158,6 @@ export default function Scanner() {
 
       const rows = Array.isArray(data) ? data : [];
       setTrips(rows);
-
-      // default optional filter: keep empty (ALL) unless you want auto-pick
-      // if (!tripId && rows.length > 0) setTripId(rows[0].id);
     } catch (e) {
       console.error(e);
       setErr(e?.message || "ΣΦΑΛΜΑ ΦΟΡΤΩΣΗΣ ΕΚΔΡΟΜΩΝ");
@@ -212,15 +209,14 @@ export default function Scanner() {
   // ---------------------------------------------------------
   // QR / STRING LOOKUP
   // - supports:
-  //   1) QR = participant UUID (most common)
-  //   2) QR = qr_token (legacy)
-  //   3) URL with ?token=... or ?id=...
+  //   1) QR = participant UUID (fast + clean)
+  //   2) URL with ?token=... or ?id=...
+  //   3) VIEW lookup (participants_qr_lookup) (NO TABLE CHANGES)
   // ---------------------------------------------------------
   function extractToken(text) {
     const raw = String(text || "").trim();
     if (!raw) return "";
 
-    // Accept URLs/schemes like ...?token=... or ...?id=...
     try {
       const url = new URL(raw);
       const t = url.searchParams.get("token");
@@ -241,7 +237,7 @@ export default function Scanner() {
     const v = String(value || "").trim();
     if (!v) return null;
 
-    // 1) If UUID: match participants.id directly (FAST, clean)
+    // 1) If UUID: match participants.id directly
     if (isUuid(v)) {
       const { data, error } = await supabase
         .from("participants")
@@ -253,20 +249,22 @@ export default function Scanner() {
       if (data?.id && data?.trip_id) return data;
     }
 
-    // 2) Legacy: qr_token
+    // 2) View lookup: participants_qr_lookup (NO TABLE CHANGES)
+    // expected columns: participant_id, trip_id, qr_token
     {
       const { data, error } = await supabase
-        .from("participants")
-        .select("id, trip_id")
+        .from("participants_qr_lookup")
+        .select("participant_id, trip_id")
         .eq("qr_token", v)
         .maybeSingle();
 
       if (error) throw error;
-      if (data?.id && data?.trip_id) return data;
+      if (data?.participant_id && data?.trip_id) {
+        return { id: data.participant_id, trip_id: data.trip_id };
+      }
     }
 
-    // 3) Fallback: sometimes QR might contain BUS CODE etc (optional)
-    // You can remove this if you DON'T want it.
+    // 3) Optional fallback: BUS CODE
     {
       const { data, error } = await supabase
         .from("participants")
@@ -335,10 +333,8 @@ export default function Scanner() {
 
   // ---------------------------------------------------------
   // CAMERA START/STOP (ZXING)
-  // ✅ IMPORTANT CHANGE:
-  // - DO NOT stop camera on decode
-  // - stop ONLY when opening card (goParticipant)
-  // - use lock to prevent spam lookups
+  // ✅ DO NOT stop camera on decode
+  // ✅ stop ONLY when opening card (goParticipant)
   // ---------------------------------------------------------
   async function startCamera() {
     if (cameraOn || cameraBusy) return;
@@ -468,7 +464,6 @@ export default function Scanner() {
         .order("full_name", { ascending: true })
         .limit(25);
 
-      // optional trip filter
       if (tripId) query = query.eq("trip_id", tripId);
 
       const { data, error } = await query;
@@ -551,7 +546,11 @@ export default function Scanner() {
                   : "bg-amber-50 border-amber-200 text-amber-800"
               )}
             >
-              {online ? <Wifi className="w-4 h-4" /> : <WifiOff className="w-4 h-4" />}
+              {online ? (
+                <Wifi className="w-4 h-4" />
+              ) : (
+                <WifiOff className="w-4 h-4" />
+              )}
               {online ? "ONLINE" : "OFFLINE"}
             </div>
           </div>
@@ -602,11 +601,17 @@ export default function Scanner() {
                 onClick={() => setSoundOn((s) => !s)}
                 className={clsx(
                   "inline-flex items-center gap-2 rounded-full px-3 py-2 text-[11px] font-extrabold border bg-white",
-                  soundOn ? "border-slate-200 text-slate-700" : "border-slate-200 text-slate-400"
+                  soundOn
+                    ? "border-slate-200 text-slate-700"
+                    : "border-slate-200 text-slate-400"
                 )}
                 title="SOUND"
               >
-                {soundOn ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+                {soundOn ? (
+                  <Volume2 className="w-4 h-4" />
+                ) : (
+                  <VolumeX className="w-4 h-4" />
+                )}
                 {soundOn ? "SOUND ON" : "MUTE"}
               </button>
 
@@ -615,7 +620,9 @@ export default function Scanner() {
                 onClick={() => setHapticOn((h) => !h)}
                 className={clsx(
                   "inline-flex items-center gap-2 rounded-full px-3 py-2 text-[11px] font-extrabold border bg-white",
-                  hapticOn ? "border-slate-200 text-slate-700" : "border-slate-200 text-slate-400"
+                  hapticOn
+                    ? "border-slate-200 text-slate-700"
+                    : "border-slate-200 text-slate-400"
                 )}
                 title="HAPTIC"
               >
@@ -629,7 +636,9 @@ export default function Scanner() {
                 className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-[11px] font-extrabold text-slate-900"
                 title="ΑΝΑΝΕΩΣΗ"
               >
-                <RefreshCw className={clsx("w-4 h-4", loadingTrips && "animate-spin")} />
+                <RefreshCw
+                  className={clsx("w-4 h-4", loadingTrips && "animate-spin")}
+                />
                 REFRESH
               </button>
             </div>
@@ -688,7 +697,9 @@ export default function Scanner() {
                     </span>
                     <span className="inline-flex items-center gap-1">
                       <Calendar className="w-3 h-3" />
-                      {selectedTrip.start_date ? String(selectedTrip.start_date).slice(0, 10) : ""}
+                      {selectedTrip.start_date
+                        ? String(selectedTrip.start_date).slice(0, 10)
+                        : ""}
                     </span>
                   </div>
                 ) : null}
@@ -757,7 +768,10 @@ export default function Scanner() {
                             <span>BUS: {String(p.bus_code).toUpperCase()}</span>
                           ) : null}
                           {p.boarding_point ? (
-                            <span>ΑΦΕΤΗΡΙΑ: {String(p.boarding_point).toUpperCase()}</span>
+                            <span>
+                              ΑΦΕΤΗΡΙΑ:{" "}
+                              {String(p.boarding_point).toUpperCase()}
+                            </span>
                           ) : null}
                         </div>
                       </div>
@@ -776,7 +790,7 @@ export default function Scanner() {
                 ) : null}
               </div>
 
-              {/* OPTIONAL: PASTE TOKEN LOOKUP (kept, but inside manual) */}
+              {/* OPTIONAL: PASTE TOKEN LOOKUP (inside manual) */}
               <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-3">
                 <div className="text-[11px] font-extrabold tracking-wide text-slate-700 mb-2">
                   QR LOOKUP (PASTE)
@@ -823,7 +837,11 @@ export default function Scanner() {
                 : "bg-white text-slate-900 border-slate-200"
             )}
           >
-            {cameraOn ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+            {cameraOn ? (
+              <Pause className="w-4 h-4" />
+            ) : (
+              <Play className="w-4 h-4" />
+            )}
             {cameraOn ? "PAUSE" : "RESUME"}
           </button>
 
