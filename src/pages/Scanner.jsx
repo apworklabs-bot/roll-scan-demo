@@ -87,6 +87,10 @@ export default function Scanner() {
   const [err, setErr] = useState("");
   const [info, setInfo] = useState("");
 
+  // ✅ DEBUG: show exactly what scanner reads (RAW / EXTRACTED / LEN)
+  const [lastScanRaw, setLastScanRaw] = useState("");
+  const [lastScanToken, setLastScanToken] = useState("");
+
   // ONLINE / OFFLINE
   const [online, setOnline] = useState(
     typeof navigator !== "undefined" ? navigator.onLine : true
@@ -197,6 +201,9 @@ export default function Scanner() {
     const t = String(rawToken || "").trim();
     if (!t) return;
 
+    // ✅ If we are already searching, do not start another lookup
+    if (busyToken) return;
+
     const now = Date.now();
     if (
       lastTokenRef.current.token === t &&
@@ -227,6 +234,7 @@ export default function Scanner() {
     } catch (e) {
       console.error("QR lookup error:", e);
       feedbackError();
+      // ✅ Keep camera ON (do not stop), show clear error
       setErr("ΔΕΝ ΒΡΕΘΗΚΕ ΕΓΚΥΡΟ QR. ΔΟΚΙΜΑΣΕ MANUAL SEARCH.");
     } finally {
       setBusyToken(false);
@@ -267,12 +275,18 @@ export default function Scanner() {
         videoRef.current,
         (result, error) => {
           if (result?.getText) {
-            const text = String(result.getText() || "").trim();
-            if (text) {
-              stopCamera();
-              const extracted = extractToken(text);
-              handleToken(extracted, "QR");
-            }
+            const raw = String(result.getText() || "");
+            const text = raw.trim();
+            if (!text) return;
+
+            // ✅ show exactly what device reads (iOS vs Android)
+            const extracted = extractToken(text);
+            setLastScanRaw(text);
+            setLastScanToken(extracted);
+
+            // ✅ DO NOT stop camera here.
+            // Only stop when we actually open participant card (success).
+            handleToken(extracted, "QR");
           } else if (error) {
             // ignore ZXing noise
           }
@@ -332,18 +346,45 @@ export default function Scanner() {
   }, []);
 
   function extractToken(text) {
-    if (/^[a-f0-9]{32}$/i.test(text)) return text;
+    const s = String(text || "").trim();
 
-    try {
-      const url = new URL(text);
-      const t = url.searchParams.get("token");
-      if (t) return t;
-    } catch {
-      const m = text.match(/token=([a-zA-Z0-9_-]+)/);
-      if (m?.[1]) return m[1];
+    // direct md5-like token
+    if (/^[a-f0-9]{32}$/i.test(s)) return s;
+
+    // uuid (some systems store uuid tokens)
+    if (
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        s
+      )
+    ) {
+      return s;
     }
 
-    return text;
+    // URL params: token / qr_token / t
+    try {
+      const url = new URL(s);
+      const t1 = url.searchParams.get("token");
+      const t2 = url.searchParams.get("qr_token");
+      const t3 = url.searchParams.get("t");
+      if (t1) return String(t1).trim();
+      if (t2) return String(t2).trim();
+      if (t3) return String(t3).trim();
+
+      // path: /scan/<token> or /qr/<token> (take last segment)
+      const parts = String(url.pathname || "")
+        .split("/")
+        .filter(Boolean);
+      const last = parts[parts.length - 1];
+      if (last && last.length >= 6) return String(last).trim();
+    } catch {
+      // plain string fallback
+      const m =
+        s.match(/(?:token|qr_token|t)=([a-zA-Z0-9_-]+)/) ||
+        s.match(/\/([a-f0-9]{32})$/i);
+      if (m?.[1]) return String(m[1]).trim();
+    }
+
+    return s;
   }
 
   // ---------------------------------------------------------
@@ -497,6 +538,25 @@ export default function Scanner() {
               {info}
             </div>
           ) : null}
+
+          {/* ✅ DEBUG LAST SCAN (helps isolate iOS vs Android instantly) */}
+          {(lastScanRaw || lastScanToken) && (
+            <div className="mb-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-700">
+              <div className="font-extrabold text-slate-600 mb-1">LAST SCAN</div>
+              <div className="break-all">
+                RAW: <span className="font-semibold">{JSON.stringify(lastScanRaw)}</span>
+              </div>
+              <div className="break-all">
+                EXTRACTED:{" "}
+                <span className="font-semibold">
+                  {JSON.stringify(lastScanToken)}
+                </span>{" "}
+                <span className="text-slate-500">
+                  (LEN={String(lastScanToken || "").length})
+                </span>
+              </div>
+            </div>
+          )}
 
           {/* Trip select */}
           <div className="bg-white rounded-2xl border border-slate-200 p-4 mb-3">
