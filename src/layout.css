@@ -1,333 +1,231 @@
-/* GLOBAL FONT (Manrope) */
-@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700&display=swap");
+/* src/layout.css */
 
+/* IOS SAFARI VIEWPORT FIX */
+html,
 body {
-  font-family: "Manrope", sans-serif;
+  height: 100%;
+}
+body {
   margin: 0;
-  padding: 0;
-  background: #fff9e7;
-  color: #1f1f1f;
+  overflow: hidden; /* ΓΙΑ ΝΑ ΜΗΝ ΚΑΝΕΙ SCROLL ΠΙΣΩ ΑΠΟ FIXED LAYERS */
+  background: #0b1220;
 }
 
-/* APP SHELL */
-.roll-app-shell {
-  display: flex;
-  height: 100vh;
+#root {
+  height: 100%;
+}
+
+/* SAFE HEIGHT (SVH) */
+.app-root {
+  height: 100%;
   width: 100%;
-  overflow: hidden;
+}
+
+/* BASE LAYOUT */
+.app-root {
+  display: flex;
+  background: #0b1220;
+  color: #e5e7eb;
+}
+
+/* TOPBAR (MOBILE) */
+.topbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 56px;
+  display: none;
+  align-items: center;
+  padding: 0 12px;
+  background: rgba(11, 18, 32, 0.92);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+  z-index: 40;
+}
+
+.topbar-btn {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(255, 255, 255, 0.04);
+  color: #e5e7eb;
+}
+
+.burger {
+  display: block;
+  width: 18px;
+  height: 2px;
+  background: #e5e7eb;
+  position: relative;
+  margin: 0 auto;
+}
+.burger::before,
+.burger::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  width: 18px;
+  height: 2px;
+  background: #e5e7eb;
+}
+.burger::before {
+  top: -6px;
+}
+.burger::after {
+  top: 6px;
+}
+
+.topbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: 10px;
+}
+.topbar-logo {
+  width: 26px;
+  height: 26px;
+  object-fit: contain;
+}
+.topbar-title {
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  font-size: 12px;
+  color: #e5e7eb;
+  opacity: 0.92;
+}
+.topbar-spacer {
+  flex: 1;
 }
 
 /* SIDEBAR */
-.roll-sidebar {
+.sidebar {
   width: 260px;
-  background: #0f1c2f;
-  color: #fff;
+  min-width: 260px;
+  height: 100%;
+  border-right: 1px solid rgba(148, 163, 184, 0.16);
+  background: linear-gradient(180deg, rgba(17, 24, 39, 0.98), rgba(2, 6, 23, 0.98));
   display: flex;
   flex-direction: column;
-  padding: 22px 18px;
 }
 
-/* LOGO BLOCK */
-.roll-sidebar-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 32px;
-}
-
-.roll-sidebar-logo-block {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.roll-sidebar-logo img {
-  width: 42px;
-  height: 42px;
-  border-radius: 8px;
-}
-
-.roll-sidebar-title {
-  font-size: 18px;
-  font-weight: 700;
-}
-
-.roll-sidebar-subtitle {
-  font-size: 12px;
-  opacity: 0.8;
-}
-
-/* 🔔 BELL (στο sidebar header) */
-.roll-sidebar-bell {
-  border: none;
-  outline: none;
-  background: rgba(255, 255, 255, 0.08);
-  color: #fff;
-  border-radius: 12px;
-  padding: 10px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.roll-sidebar-bell:hover {
-  background: rgba(255, 255, 255, 0.12);
-}
-
-/* ✅ MOBILE CLOSE BUTTON (X) */
-.roll-sidebar-close {
-  display: none; /* desktop: κρυφό */
-  border: none;
-  outline: none;
-  background: rgba(255, 255, 255, 0.08);
-  color: #fff;
-  border-radius: 12px;
-  padding: 10px;
-  cursor: pointer;
-  align-items: center;
-  justify-content: center;
-}
-
-.roll-sidebar-close:hover {
-  background: rgba(255, 255, 255, 0.12);
-}
-
-/* SIDEBAR NAV */
-.roll-sidebar-section-label {
-  margin: 10px 0 14px;
-  font-size: 12px;
-  font-weight: 600;
-  opacity: 0.6;
-}
-
-.roll-sidebar-nav {
+.sidebar-head {
+  padding: 16px 16px 10px 16px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  flex: 1;
+  gap: 8px;
+}
+.sidebar-logo {
+  width: 120px;
+  height: 28px;
+  object-fit: contain;
+}
+.sidebar-subtitle {
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  opacity: 0.55;
 }
 
-.roll-nav-link {
+/* NAV */
+.nav {
+  padding: 12px;
   display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 14px;
-  padding: 10px 12px;
-  border-radius: 10px;
-  text-decoration: none;
-  color: #cbd5e1;
-  transition: 0.2s;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.roll-nav-link:hover {
-  background: #24344d;
-}
-
-.roll-nav-link-active {
-  background: #ffc733 !important;
-  color: #000;
-}
-
-.roll-nav-link-active .roll-nav-icon {
-  color: #000 !important;
-}
-
-/* BOTTOM USER */
-.roll-sidebar-user-card {
-  padding: 14px 10px;
-  margin-top: 16px;
-  background: rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
+.nav-item {
   display: flex;
   align-items: center;
   gap: 12px;
-  border: none;
-  cursor: pointer;
+  padding: 12px 12px;
+  border-radius: 14px;
+  text-decoration: none;
+  color: rgba(226, 232, 240, 0.88);
+  border: 1px solid rgba(148, 163, 184, 0.10);
+  background: rgba(255, 255, 255, 0.03);
 }
 
-.roll-sidebar-user-card:hover {
-  background: rgba(255, 255, 255, 0.12);
+.nav-item:hover {
+  background: rgba(255, 255, 255, 0.06);
 }
 
-.roll-user-avatar {
-  width: 36px;
-  height: 36px;
-  background: #ffc733;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: bold;
-  color: #000;
+.nav-item.active {
+  background: rgba(250, 204, 21, 0.92); /* YELLOW */
+  color: #0b1220;
+  border-color: rgba(250, 204, 21, 0.7);
 }
 
-.roll-user-texts {
-  display: flex;
-  flex-direction: column;
-  line-height: 14px;
-}
-
-.roll-user-name {
-  font-size: 14px;
-  font-weight: 700;
-}
-
-.roll-user-role {
-  font-size: 12px;
-  opacity: 0.7;
-}
-
-/* MAIN AREA */
-.roll-main {
+/* MAIN */
+.app-main {
   flex: 1;
-  display: flex;
-  background: #fff9e7;
-  overflow-y: auto;
+  height: 100%;
+  overflow: auto;
+  background: #0b1220;
+  padding: 18px;
 }
 
-.roll-main-inner {
-  width: 100%;
-  max-width: 1600px; /* FULL CENTER LAYOUT */
-  margin: 0 auto;
-  padding: 32px 48px; /* EVEN PADDING */
+/* FIELD MODE: FULLSCREEN, NO PADDING, NO SCROLL BACKGROUND */
+.app-field {
+  height: 100svh;
+  width: 100vw;
+  overflow: hidden;
 }
 
-.roll-main-content {
-  display: flex;
-  flex-direction: column;
-  gap: 32px;
+.app-main-field {
+  height: 100svh;
+  width: 100vw;
+  padding: 0;
+  overflow: hidden;
 }
 
-/* SUPPORT */
-.badge {
-  padding: 4px 10px;
-  border-radius: 12px;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.badge.green {
-  background: #d2f1d4;
-  color: #0b6c1f;
-}
-
-/* =========================
-   MOBILE TOP BAR (ΝΕΟ)
-   ========================= */
-.roll-mobile-topbar {
+/* MOBILE DRAWER */
+.drawer {
   display: none;
 }
 
-.roll-mobile-iconbtn {
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  background: #ffffff;
-  border-radius: 12px;
-  padding: 10px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+.drawer.open {
+  display: block;
 }
 
-.roll-mobile-brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-.roll-mobile-logo {
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
-  object-fit: contain;
-}
-
-.roll-mobile-brand-text {
-  display: flex;
-  flex-direction: column;
-  line-height: 14px;
-  min-width: 0;
-}
-
-.roll-mobile-title {
-  font-weight: 800;
-  font-size: 13px;
-  color: #111827;
-}
-
-.roll-mobile-subtitle {
-  font-size: 11px;
-  color: #6b7280;
-}
-
-/* MOBILE OVERLAY (κλείνει sidebar με tap) */
-.roll-mobile-overlay {
+.drawer-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  z-index: 9998;
+  background: rgba(2, 6, 23, 0.55);
+  z-index: 60;
 }
 
-/* =========================
-   MOBILE SIDEBAR DRAWER
-   ========================= */
-@media (max-width: 768px) {
-  /* δείχνουμε topbar */
-  .roll-mobile-topbar {
+.drawer-panel {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 84vw;
+  max-width: 320px;
+  height: 100svh;
+  z-index: 70;
+  border-right: 1px solid rgba(148, 163, 184, 0.16);
+  background: linear-gradient(180deg, rgba(17, 24, 39, 0.98), rgba(2, 6, 23, 0.98));
+  transform: translateX(0);
+}
+
+/* RESPONSIVE */
+.desktop-only {
+  display: flex;
+}
+
+@media (max-width: 900px) {
+  .topbar {
     display: flex;
-    position: sticky;
-    top: 0;
-    z-index: 50;
-    background: #fff9e7;
-    padding: 12px 12px 10px;
-    gap: 10px;
-    align-items: center;
-    justify-content: space-between;
-    border-bottom: 1px solid rgba(15, 28, 47, 0.08);
   }
-
-  /* sidebar γίνεται drawer */
-  .roll-sidebar {
-    position: fixed;
-    top: 0;
-    left: 0;
-    bottom: 0;
-    width: 280px;
-    z-index: 9999;
-    transform: translateX(-100%);
-    transition: transform 0.25s ease;
-    padding-top: 18px;
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-  }
-
-  .roll-sidebar.mobile-open {
-    transform: translateX(0);
-  }
-
-  /* ✅ στο mobile: κρύβουμε το desktop bell για να μη φαίνεται 2 φορές */
-  .roll-sidebar-bell {
+  .desktop-only {
     display: none;
   }
-
-  /* ✅ στο mobile: δείχνουμε το X close */
-  .roll-sidebar-close {
-    display: inline-flex;
-  }
-
-  /* στο mobile δεν θες το “extra” margin/padding */
-  .roll-main {
-    width: 100%;
-    margin-left: 0;
-  }
-
-  .roll-main-inner {
-    padding: 16px 12px 24px;
-  }
-
-  /* spacing στο sidebar */
-  .roll-sidebar-header {
-    margin-bottom: 18px;
+  .app-main {
+    padding-top: 70px; /* ΚΑΤΩ ΑΠΟ TOPBAR */
+    padding-left: 14px;
+    padding-right: 14px;
+    padding-bottom: 18px;
   }
 }

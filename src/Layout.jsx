@@ -1,313 +1,160 @@
 // src/Layout.jsx
 import React, { useEffect, useMemo, useState } from "react";
-import { NavLink, useLocation, useNavigate } from "react-router-dom";
-import { BarChart3, Wifi, ScanLine, BusFront, Bell, Menu, X } from "lucide-react";
+import { NavLink, useLocation } from "react-router-dom";
+import {
+  BarChart3,
+  Wifi,
+  ScanLine,
+  BusFront,
+  Bell,
+  SlidersHorizontal,
+} from "lucide-react";
 
 import "./layout.css";
 import rollscanLogo from "./assets/rollscan-logo.png";
-import { supabase } from "./lib/supabaseClient";
-
-const LAST_SEEN_KEY = "rollscan:lastSeenNotificationsAt";
 
 export default function Layout({ children }) {
   const location = useLocation();
-  const navigate = useNavigate();
-
-  const [unreadCount, setUnreadCount] = useState(0);
-
-  // ✅ MOBILE DRAWER
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  // close drawer on route change (mobile)
-  useEffect(() => {
-    setMobileOpen(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  /**
+   * FIELD MODE (MOBILE FULLSCREEN)
+   * ΜΟΝΟ ΓΙΑ:
+   * - SCANNER
+   * - SCAN CARD
+   * - ΠΛΗΡΩΜΕΣ ΠΕΔΙΟΥ
+   */
+  const isFieldMode = useMemo(() => {
+    const p = location.pathname || "";
+    return (
+      p === "/scanner" || p.startsWith("/scan-card") || p === "/bus-payments"
+    );
   }, [location.pathname]);
 
-  const lastSeenIso = useMemo(() => {
-    return localStorage.getItem(LAST_SEEN_KEY) || "1970-01-01T00:00:00.000Z";
-  }, [location.pathname]); // refresh when route changes
-
-  /**
-   * WIDE / FIELD MODE
-   */
-  const isWidePage =
-    location.pathname === "/scanner" ||
-    location.pathname.startsWith("/scanner/") ||
-    location.pathname.startsWith("/scan-card") ||
-    location.pathname === "/bus-payments" ||
-    location.pathname.startsWith("/bus-payments/") ||
-    location.pathname === "/notifications-center" ||
-    location.pathname.startsWith("/notifications-center/");
-
-  // Load unread count (Supabase-only, based on "last seen" timestamp)
+  // ΚΛΕΙΝΕ ΤΟ MOBILE DRAWER ΟΤΑΝ ΑΛΛΑΖΕΙ ROUTE
   useEffect(() => {
-    let cancelled = false;
+    setMobileOpen(false);
+  }, [location.pathname]);
 
-    async function loadUnread() {
-      try {
-        const { count, error } = await supabase
-          .from("notifications")
-          .select("id", { count: "exact", head: true })
-          .gt("created_at", lastSeenIso);
+  // ✅ HARD: LOCK BODY SCROLL WHEN IN FIELD MODE OR DRAWER OPEN (iOS-friendly)
+  useEffect(() => {
+    const shouldLock = isFieldMode || mobileOpen;
 
-        if (error) throw error;
-        if (!cancelled) setUnreadCount(Math.max(0, count || 0));
-      } catch (e) {
-        console.error("Layout: notifications unreadCount error", e);
-        if (!cancelled) setUnreadCount(0);
-      }
+    const prevOverflow = document.body.style.overflow;
+    const prevHeight = document.body.style.height;
+
+    if (shouldLock) {
+      document.body.style.overflow = "hidden";
+      document.body.style.height = "100%";
     }
 
-    loadUnread();
     return () => {
-      cancelled = true;
+      document.body.style.overflow = prevOverflow;
+      document.body.style.height = prevHeight;
     };
-  }, [lastSeenIso]);
+  }, [isFieldMode, mobileOpen]);
 
-  // Realtime: increment unread on new notifications
-  useEffect(() => {
-    const channel = supabase
-      .channel("realtime:layout-notifications-bell")
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "notifications" },
-        (payload) => {
-          const row = payload.new;
-          const createdAt = row?.created_at;
-
-          // count only if newer than last seen
-          if (createdAt && new Date(createdAt) > new Date(lastSeenIso)) {
-            setUnreadCount((c) => Math.min(999, (c || 0) + 1));
-          }
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [lastSeenIso]);
-
-  function handleBellClick() {
-    // mark seen now (local)
-    const nowIso = new Date().toISOString();
-    localStorage.setItem(LAST_SEEN_KEY, nowIso);
-    setUnreadCount(0);
-
-    navigate("/notifications-center");
-  }
-
-  function handleUserClick() {
-    navigate("/profile");
-  }
-
-  function closeMobile() {
-    setMobileOpen(false);
-  }
-
-  function openMobile() {
-    setMobileOpen(true);
-  }
-
-  // helper: close drawer after clicking nav (mobile)
-  function navClass({ isActive }) {
-    return "roll-nav-link" + (isActive ? " roll-nav-link-active" : "");
+  // FIELD MODE: FULLSCREEN, NO SIDEBAR, NO WRAPPERS
+  if (isFieldMode) {
+    return (
+      <div
+        className="app-root app-field"
+        style={{
+          height: "100svh",
+          width: "100vw",
+          overflow: "hidden",
+        }}
+      >
+        <main
+          className="app-main app-main-field"
+          style={{
+            height: "100svh",
+            width: "100vw",
+            overflow: "hidden",
+          }}
+        >
+          {children}
+        </main>
+      </div>
+    );
   }
 
   return (
-    <div className="roll-app-shell">
-      {/* ✅ MOBILE TOP BAR (ONLY ON MOBILE) */}
-      <div className="roll-mobile-topbar">
+    <div className="app-root">
+      {/* MOBILE TOP BAR */}
+      <div className="topbar">
         <button
-          type="button"
-          className="roll-mobile-iconbtn"
-          onClick={openMobile}
-          aria-label="Open menu"
+          className="topbar-btn"
+          onClick={() => setMobileOpen((v) => !v)}
+          aria-label="Menu"
         >
-          <Menu size={20} />
+          <span className="burger" />
         </button>
 
-        <div className="roll-mobile-brand">
-          <img src={rollscanLogo} alt="Roll Scan" className="roll-mobile-logo" />
-          <div className="roll-mobile-brand-text">
-            <div className="roll-mobile-title">Roll Scan</div>
-            <div className="roll-mobile-subtitle">ΠΑΡΟΥΣΙΟΛΟΓΙΟ</div>
-          </div>
+        <div className="topbar-brand">
+          <img src={rollscanLogo} alt="RollScan" className="topbar-logo" />
+          <div className="topbar-title">ROLLSCAN</div>
         </div>
 
-        <button
-          className="roll-mobile-iconbtn"
-          title="Ειδοποιήσεις"
-          onClick={handleBellClick}
-          type="button"
-          style={{ position: "relative" }}
-          aria-label="Notifications"
-        >
-          <Bell size={18} />
-          {unreadCount > 0 && (
-            <span
-              style={{
-                position: "absolute",
-                top: "-4px",
-                right: "-4px",
-                minWidth: "18px",
-                height: "18px",
-                padding: "0 5px",
-                borderRadius: "999px",
-                fontSize: "11px",
-                lineHeight: "18px",
-                fontWeight: 700,
-                background: "#EF4444",
-                color: "white",
-                boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
-              }}
-            >
-              {unreadCount > 99 ? "99+" : unreadCount}
-            </span>
-          )}
-        </button>
+        <div className="topbar-spacer" />
       </div>
 
-      {/* SIDEBAR */}
-      <aside className={`roll-sidebar ${mobileOpen ? "mobile-open" : ""}`}>
-        {/* TOP */}
-        <div className="roll-sidebar-header">
-          <div className="roll-sidebar-logo-block">
-            <div className="roll-sidebar-logo">
-              <img
-                src={rollscanLogo}
-                alt="Roll Scan"
-                className="w-9 h-9 object-contain"
-              />
-            </div>
-
-            <div className="roll-sidebar-title-wrap">
-              <div className="roll-sidebar-title">Roll Scan</div>
-              <div className="roll-sidebar-subtitle">Παρουσιολόγιο Εκδρομών</div>
-            </div>
-          </div>
-
-          {/* ✅ MOBILE CLOSE (ONLY ON MOBILE) */}
-          <button
-            type="button"
-            className="roll-sidebar-close"
-            onClick={closeMobile}
-            aria-label="Close menu"
-          >
-            <X size={18} />
-          </button>
-
-          {/* 🔔 BELL (DESKTOP) */}
-          <button
-            className="roll-sidebar-bell"
-            title="Ειδοποιήσεις"
-            onClick={handleBellClick}
-            type="button"
-            style={{ position: "relative" }}
-          >
-            <Bell size={18} />
-            {unreadCount > 0 && (
-              <span
-                style={{
-                  position: "absolute",
-                  top: "-4px",
-                  right: "-4px",
-                  minWidth: "18px",
-                  height: "18px",
-                  padding: "0 5px",
-                  borderRadius: "999px",
-                  fontSize: "11px",
-                  lineHeight: "18px",
-                  fontWeight: 700,
-                  background: "#EF4444",
-                  color: "white",
-                  boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
-                }}
-              >
-                {unreadCount > 99 ? "99+" : unreadCount}
-              </span>
-            )}
-          </button>
+      {/* SIDEBAR (DESKTOP STATIC) */}
+      <aside className="sidebar desktop-only">
+        <div className="sidebar-head">
+          <img src={rollscanLogo} alt="RollScan" className="sidebar-logo" />
+          <div className="sidebar-subtitle">ΔΙΑΧΕΙΡΙΣΤΗΣ</div>
         </div>
 
-        {/* SECTION */}
-        <div className="roll-sidebar-section-label">ΔΙΑΧΕΙΡΙΣΤΗΣ</div>
-
-        {/* NAV */}
-        <nav className="roll-sidebar-nav">
-          <NavLink to="/dashboard" className={navClass} onClick={closeMobile}>
-            <BarChart3 size={18} />
-            <span>Dashboard</span>
-          </NavLink>
-
-          <NavLink
-            to="/live-attendance"
-            className={navClass}
-            onClick={closeMobile}
-          >
-            <Wifi size={18} />
-            <span>Live Attendance</span>
-          </NavLink>
-
-          <NavLink to="/scanner" className={navClass} onClick={closeMobile}>
-            <ScanLine size={18} />
-            <span>Scanner</span>
-          </NavLink>
-
-          <NavLink to="/bus-payments" className={navClass} onClick={closeMobile}>
-            <BusFront size={18} />
-            <span>Πληρωμές Πεδίου</span>
-          </NavLink>
-
-          <NavLink
-            to="/notifications-center"
-            className={navClass}
-            onClick={closeMobile}
-          >
-            <Bell size={18} />
-            <span>Ειδοποιήσεις</span>
-          </NavLink>
+        <nav className="nav">
+          <NavItem to="/dashboard" icon={BarChart3} label="Dashboard" />
+          <NavItem to="/live" icon={Wifi} label="Live Attendance" />
+          <NavItem to="/scanner" icon={ScanLine} label="Scanner" />
+          <NavItem to="/bus-payments" icon={BusFront} label="Πληρωμες Πεδιου" />
+          <NavItem to="/notifications" icon={Bell} label="Ειδοποιησεις" />
+          <NavItem to="/settings" icon={SlidersHorizontal} label="Settings" />
         </nav>
-
-        {/* USER (BOTTOM) */}
-        <button
-          type="button"
-          className="roll-sidebar-user-card"
-          onClick={() => {
-            closeMobile();
-            handleUserClick();
-          }}
-          style={{ textAlign: "left", width: "100%" }}
-          title="Profile"
-        >
-          <div className="roll-user-avatar">m</div>
-          <div className="roll-user-texts">
-            <div className="roll-user-name">markus_vi</div>
-            <div className="roll-user-role">Διαχειριστής</div>
-          </div>
-        </button>
       </aside>
 
-      {/* ✅ OVERLAY (ONLY ON MOBILE WHEN OPEN) */}
-      {mobileOpen && (
-        <div className="roll-mobile-overlay" onClick={closeMobile} />
-      )}
+      {/* MOBILE DRAWER */}
+      <div className={`drawer ${mobileOpen ? "open" : ""}`}>
+        <div className="drawer-backdrop" onClick={() => setMobileOpen(false)} />
+
+        <aside className="drawer-panel">
+          <div className="sidebar-head">
+            <img src={rollscanLogo} alt="RollScan" className="sidebar-logo" />
+            <div className="sidebar-subtitle">ΔΙΑΧΕΙΡΙΣΤΗΣ</div>
+          </div>
+
+          <nav className="nav">
+            <NavItem to="/dashboard" icon={BarChart3} label="Dashboard" />
+            <NavItem to="/live" icon={Wifi} label="Live Attendance" />
+            <NavItem to="/scanner" icon={ScanLine} label="Scanner" />
+            <NavItem
+              to="/bus-payments"
+              icon={BusFront}
+              label="Πληρωμες Πεδιου"
+            />
+            <NavItem to="/notifications" icon={Bell} label="Ειδοποιησεις" />
+            <NavItem to="/settings" icon={SlidersHorizontal} label="Settings" />
+          </nav>
+        </aside>
+      </div>
 
       {/* MAIN */}
-      <main className="roll-main">
-        <div className="roll-main-inner">
-          <div
-            className={
-              isWidePage
-                ? "roll-main-content"
-                : "roll-main-content roll-main-content-narrow"
-            }
-          >
-            {children}
-          </div>
-        </div>
-      </main>
+      <main className="app-main">{children}</main>
     </div>
+  );
+}
+
+function NavItem({ to, icon: Icon, label }) {
+  return (
+    <NavLink
+      to={to}
+      className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
+    >
+      <Icon size={18} />
+      <span>{label}</span>
+    </NavLink>
   );
 }
