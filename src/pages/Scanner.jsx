@@ -1,4 +1,4 @@
-// src/Pages/Scanner.jsx
+// src/pages/Scanner.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
@@ -201,7 +201,7 @@ export default function Scanner() {
     const t = String(rawToken || "").trim();
     if (!t) return;
 
-    // ✅ If we are already searching, do not start another lookup
+    // ✅ If already searching, do not start another lookup
     if (busyToken) return;
 
     const now = Date.now();
@@ -234,7 +234,7 @@ export default function Scanner() {
     } catch (e) {
       console.error("QR lookup error:", e);
       feedbackError();
-      // ✅ Keep camera ON (do not stop), show clear error
+      // ✅ keep camera ON; show clear error
       setErr("ΔΕΝ ΒΡΕΘΗΚΕ ΕΓΚΥΡΟ QR. ΔΟΚΙΜΑΣΕ MANUAL SEARCH.");
     } finally {
       setBusyToken(false);
@@ -279,13 +279,14 @@ export default function Scanner() {
             const text = raw.trim();
             if (!text) return;
 
-            // ✅ show exactly what device reads (iOS vs Android)
             const extracted = extractToken(text);
+
+            // ✅ UI debug (no console needed)
             setLastScanRaw(text);
             setLastScanToken(extracted);
 
-            // ✅ DO NOT stop camera here.
-            // Only stop when we actually open participant card (success).
+            // ✅ do NOT stop camera on decode
+            // stop only when we successfully open the card (inside goParticipant)
             handleToken(extracted, "QR");
           } else if (error) {
             // ignore ZXing noise
@@ -348,10 +349,10 @@ export default function Scanner() {
   function extractToken(text) {
     const s = String(text || "").trim();
 
-    // direct md5-like token
+    // md5-like token
     if (/^[a-f0-9]{32}$/i.test(s)) return s;
 
-    // uuid (some systems store uuid tokens)
+    // uuid-like token (if ever used)
     if (
       /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
         s
@@ -370,14 +371,13 @@ export default function Scanner() {
       if (t2) return String(t2).trim();
       if (t3) return String(t3).trim();
 
-      // path: /scan/<token> or /qr/<token> (take last segment)
+      // path last segment
       const parts = String(url.pathname || "")
         .split("/")
         .filter(Boolean);
       const last = parts[parts.length - 1];
       if (last && last.length >= 6) return String(last).trim();
     } catch {
-      // plain string fallback
       const m =
         s.match(/(?:token|qr_token|t)=([a-zA-Z0-9_-]+)/) ||
         s.match(/\/([a-f0-9]{32})$/i);
@@ -477,7 +477,6 @@ export default function Scanner() {
   }, [location.key]);
 
   return (
-    // ✅ FULLSCREEN SHELL (fixes sidebar overlay / split look / iOS vh issues)
     <div
       className="fixed inset-0 bg-slate-50"
       style={{
@@ -487,11 +486,10 @@ export default function Scanner() {
         WebkitOverflowScrolling: "touch",
       }}
     >
-      {/* ✅ ONLY this area scrolls */}
       <div
         className="h-full overflow-y-auto"
         style={{
-          paddingBottom: "calc(92px + env(safe-area-inset-bottom))", // room for bottom bar
+          paddingBottom: "calc(92px + env(safe-area-inset-bottom))",
         }}
       >
         <div className="w-full max-w-none mx-auto px-3 pt-3">
@@ -539,12 +537,15 @@ export default function Scanner() {
             </div>
           ) : null}
 
-          {/* ✅ DEBUG LAST SCAN (helps isolate iOS vs Android instantly) */}
-          {(lastScanRaw || lastScanToken) && (
+          {/* ✅ DEBUG LAST SCAN */}
+          {(lastScanRaw || lastScanToken) ? (
             <div className="mb-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-700">
               <div className="font-extrabold text-slate-600 mb-1">LAST SCAN</div>
               <div className="break-all">
-                RAW: <span className="font-semibold">{JSON.stringify(lastScanRaw)}</span>
+                RAW:{" "}
+                <span className="font-semibold">
+                  {JSON.stringify(lastScanRaw)}
+                </span>
               </div>
               <div className="break-all">
                 EXTRACTED:{" "}
@@ -556,7 +557,7 @@ export default function Scanner() {
                 </span>
               </div>
             </div>
-          )}
+          ) : null}
 
           {/* Trip select */}
           <div className="bg-white rounded-2xl border border-slate-200 p-4 mb-3">
@@ -764,50 +765,38 @@ export default function Scanner() {
                 </div>
               ) : null}
 
-              {results.map((p) => {
-                const badge = "bg-slate-900 text-white";
-                const statusLabel = "OK";
-
-                return (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() =>
-                      goParticipant(p.trip_id || tripId, p.id, "MANUAL")
-                    }
-                    className="w-full text-left rounded-xl border border-slate-200 bg-white hover:bg-slate-50 px-3 py-2"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="text-sm font-extrabold text-slate-900 truncate">
-                          {p.full_name || "ΧΩΡΙΣ ΟΝΟΜΑ"}
-                        </div>
-                        <div className="mt-1 text-[11px] text-slate-600 flex flex-wrap gap-3">
-                          {p.phone ? <span>ΤΗΛ: {p.phone}</span> : null}
-                          {p.email ? <span>EMAIL: {p.email}</span> : null}
-                          {p.bus_code ? (
-                            <span>BUS: {String(p.bus_code).toUpperCase()}</span>
-                          ) : null}
-                          {p.boarding_point ? (
-                            <span>
-                              ΑΦΕΤΗΡΙΑ: {String(p.boarding_point).toUpperCase()}
-                            </span>
-                          ) : null}
-                        </div>
+              {results.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => goParticipant(p.trip_id || tripId, p.id, "MANUAL")}
+                  className="w-full text-left rounded-xl border border-slate-200 bg-white hover:bg-slate-50 px-3 py-2"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-sm font-extrabold text-slate-900 truncate">
+                        {p.full_name || "ΧΩΡΙΣ ΟΝΟΜΑ"}
                       </div>
-
-                      <span
-                        className={clsx(
-                          "px-3 py-1 rounded-full text-[10px] font-bold",
-                          badge
-                        )}
-                      >
-                        {statusLabel}
-                      </span>
+                      <div className="mt-1 text-[11px] text-slate-600 flex flex-wrap gap-3">
+                        {p.phone ? <span>ΤΗΛ: {p.phone}</span> : null}
+                        {p.email ? <span>EMAIL: {p.email}</span> : null}
+                        {p.bus_code ? (
+                          <span>BUS: {String(p.bus_code).toUpperCase()}</span>
+                        ) : null}
+                        {p.boarding_point ? (
+                          <span>
+                            ΑΦΕΤΗΡΙΑ: {String(p.boarding_point).toUpperCase()}
+                          </span>
+                        ) : null}
+                      </div>
                     </div>
-                  </button>
-                );
-              })}
+
+                    <span className="px-3 py-1 rounded-full text-[10px] font-bold bg-slate-900 text-white">
+                      OK
+                    </span>
+                  </div>
+                </button>
+              ))}
 
               {results.length === 0 ? (
                 <div className="text-[11px] text-slate-500">
@@ -817,7 +806,6 @@ export default function Scanner() {
             </div>
           </div>
 
-          {/* extra bottom space so last cards never hide behind bottom bar */}
           <div className="h-4" />
         </div>
       </div>
@@ -825,10 +813,7 @@ export default function Scanner() {
       {/* ✅ MOBILE BOTTOM CONTROLS (fixed) */}
       <div
         className="fixed left-0 right-0 z-50 bg-white border-t border-slate-200"
-        style={{
-          bottom: 0,
-          paddingBottom: "env(safe-area-inset-bottom)",
-        }}
+        style={{ bottom: 0, paddingBottom: "env(safe-area-inset-bottom)" }}
       >
         <div className="px-3 py-3 grid grid-cols-3 gap-2">
           <button
