@@ -205,8 +205,13 @@ export default function Scanner() {
 
   // ---------------------------------------------------------
   // CAMERA STOP (HARD KILL: reader + tracks + srcObject)
+  // ✅ ALSO unlock locks (fix "CAMERA ON but dead")
   // ---------------------------------------------------------
   function stopCamera() {
+    // ✅ unlock everything
+    lookupLockRef.current = false;
+    lastTokenRef.current = { token: "", ts: 0 };
+
     try {
       readerRef.current?.reset?.();
     } catch {}
@@ -421,7 +426,8 @@ export default function Scanner() {
 
   // ---------------------------------------------------------
   // CAMERA START (ZXING)
-  // ✅ use decodeFromConstraints (environment camera) for iOS stability
+  // ✅ use decodeFromConstraints (environment camera) for iOS/Android stability
+  // ✅ also increases decode consistency
   // ---------------------------------------------------------
   async function startCamera() {
     if (cameraOn || cameraBusy) return;
@@ -434,18 +440,25 @@ export default function Scanner() {
     try {
       if (!videoRef.current) throw new Error("NO VIDEO ELEMENT");
 
-      // Hard reset anything previous
+      // ✅ hard reset previous session (fixes "camera on but not scanning")
       stopCamera();
 
       const reader = new BrowserMultiFormatReader();
+      try {
+        // some builds support it; ignore if not
+        reader.timeBetweenDecodingAttempts = 120;
+      } catch {}
       readerRef.current = reader;
 
       setCameraOn(true);
 
-      // ✅ best-practice: ask explicitly for back camera
       const constraints = {
-        video: { facingMode: { ideal: "environment" } },
         audio: false,
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
       };
 
       await reader.decodeFromConstraints(
@@ -612,7 +625,11 @@ export default function Scanner() {
                   : "bg-amber-50 border-amber-200 text-amber-800"
               )}
             >
-              {online ? <Wifi className="w-4 h-4" /> : <WifiOff className="w-4 h-4" />}
+              {online ? (
+                <Wifi className="w-4 h-4" />
+              ) : (
+                <WifiOff className="w-4 h-4" />
+              )}
               {online ? "ONLINE" : "OFFLINE"}
             </div>
           </div>
@@ -667,7 +684,11 @@ export default function Scanner() {
                 )}
                 title="SOUND"
               >
-                {soundOn ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+                {soundOn ? (
+                  <Volume2 className="w-4 h-4" />
+                ) : (
+                  <VolumeX className="w-4 h-4" />
+                )}
                 {soundOn ? "SOUND ON" : "MUTE"}
               </button>
 
@@ -692,7 +713,9 @@ export default function Scanner() {
                 className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-[11px] font-extrabold text-slate-900"
                 title="ΑΝΑΝΕΩΣΗ"
               >
-                <RefreshCw className={clsx("w-4 h-4", loadingTrips && "animate-spin")} />
+                <RefreshCw
+                  className={clsx("w-4 h-4", loadingTrips && "animate-spin")}
+                />
                 REFRESH
               </button>
             </div>
@@ -749,7 +772,9 @@ export default function Scanner() {
                     </span>
                     <span className="inline-flex items-center gap-1">
                       <Calendar className="w-3 h-3" />
-                      {selectedTrip.start_date ? String(selectedTrip.start_date).slice(0, 10) : ""}
+                      {selectedTrip.start_date
+                        ? String(selectedTrip.start_date).slice(0, 10)
+                        : ""}
                     </span>
                   </div>
                 ) : null}
@@ -812,9 +837,16 @@ export default function Scanner() {
                         <div className="mt-1 text-[11px] text-slate-600 flex flex-wrap gap-3">
                           {p.phone ? <span>ΤΗΛ: {p.phone}</span> : null}
                           {p.email ? <span>EMAIL: {p.email}</span> : null}
-                          {p.bus_code ? <span>BUS: {String(p.bus_code).toUpperCase()}</span> : null}
+                          {p.bus_code ? (
+                            <span>
+                              BUS: {String(p.bus_code).toUpperCase()}
+                            </span>
+                          ) : null}
                           {p.boarding_point ? (
-                            <span>ΑΦΕΤΗΡΙΑ: {String(p.boarding_point).toUpperCase()}</span>
+                            <span>
+                              ΑΦΕΤΗΡΙΑ:{" "}
+                              {String(p.boarding_point).toUpperCase()}
+                            </span>
                           ) : null}
                         </div>
                       </div>
@@ -877,7 +909,11 @@ export default function Scanner() {
                 : "bg-white text-slate-900 border-slate-200"
             )}
           >
-            {cameraOn ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+            {cameraOn ? (
+              <Pause className="w-4 h-4" />
+            ) : (
+              <Play className="w-4 h-4" />
+            )}
             {cameraOn ? "PAUSE" : "RESUME"}
           </button>
 
@@ -890,7 +926,11 @@ export default function Scanner() {
               !cameraOn && "opacity-50 cursor-not-allowed"
             )}
           >
-            {torchOn ? <FlashlightOff className="w-4 h-4" /> : <Flashlight className="w-4 h-4" />}
+            {torchOn ? (
+              <FlashlightOff className="w-4 h-4" />
+            ) : (
+              <Flashlight className="w-4 h-4" />
+            )}
             FLASH
           </button>
 
