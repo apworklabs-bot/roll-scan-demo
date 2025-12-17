@@ -30,7 +30,11 @@ function clsx(...a) {
 // ============================
 const PAYMENTS_SUMMARY_VIEW = "bus_payments_summary"; // optional view
 const ATTENDANCE_TABLE = "attendance_logs"; // ✅ YOUR REAL TABLE
-const EQUIPMENT_LOANS_TABLE = "equipment_loans"; // optional table
+
+// ✅ Equipment (NEW SOURCE OF TRUTH)
+const EQUIPMENT_ALLOCATIONS_VIEW = "front_participant_allocations_open_v2";
+// ✅ Equipment return action (RPC)
+const EQUIPMENT_RETURN_RPC = "mark_allocation_returned_v2";
 
 // ============================
 // HELPERS
@@ -59,6 +63,13 @@ function chipClass(kind) {
   }
 }
 
+// ✅ robust parse for mobile (accepts "5,00" or "5.00")
+function parseAmount(v) {
+  const s = String(v ?? "").trim().replace(",", ".");
+  const n = Number(s);
+  return Number.isFinite(n) ? n : NaN;
+}
+
 export default function ScanCard() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -82,6 +93,8 @@ export default function ScanCard() {
     method: null,
   });
   const [paymentsHistory, setPaymentsHistory] = useState([]); // optional
+
+  // ✅ Equipment allocations (from view)
   const [loans, setLoans] = useState([]);
   const [loansCount, setLoansCount] = useState(0);
 
@@ -100,7 +113,7 @@ export default function ScanCard() {
   // money draft
   const [payAmount, setPayAmount] = useState("");
   const [payMethod, setPayMethod] = useState("CASH"); // CASH | CARD | TRANSFER
-  const [receipt, setReceipt] = useState(false);
+  const [receipt, setReceipt] = useState(false); // UI only (no DB column)
 
   const scanMethod = location.state?.scanMethod || "QR";
 
@@ -120,7 +133,7 @@ export default function ScanCard() {
     return () => clearTimeout(t);
   }, [toast]);
 
-  // ✅ Guard: if someone opens ScanCard without params, bounce out (prevents weird loops)
+  // ✅ Guard
   useEffect(() => {
     if (!canLoad) {
       navigate("/scanner", { replace: true, state: { resume: true } });
@@ -269,14 +282,14 @@ export default function ScanCard() {
         setPaymentsHistory([]);
       }
 
-      // 6) Equipment loans (optional)
+      // ✅ 6) Equipment allocations (NEW: from view)
       try {
         const { data: l, error: lErr } = await supabase
-          .from(EQUIPMENT_LOANS_TABLE)
-          .select("id, item_name, set_name, status, qty, created_at, updated_at")
+          .from(EQUIPMENT_ALLOCATIONS_VIEW)
+          .select("id, item_code, item_name, status, qty, assigned_at, returned_at")
           .eq("trip_id", tripId)
           .eq("participant_id", participantId)
-          .order("created_at", { ascending: false });
+          .order("assigned_at", { ascending: false });
 
         if (lErr) throw lErr;
 
@@ -324,17 +337,15 @@ export default function ScanCard() {
         return;
       }
 
-      // ✅ logs: write a new row (no upsert)
       const event_type = presentValue === true ? "IN" : "OUT";
 
       const payload = {
         trip_id: tripId,
         participant_id: participantId,
         scanned_at: new Date().toISOString(),
-        source: String(scanMethod || "scanner").toLowerCase(), // "qr" | "manual" | "paste"
+        source: String(scanMethod || "scanner").toLowerCase(),
         note: attendance.notes || "",
         event_type,
-        // scanned_by: leave null unless you have auth user id
       };
 
       const { error } = await supabase.from(ATTENDANCE_TABLE).insert(payload);
@@ -359,14 +370,15 @@ export default function ScanCard() {
   }
 
   async function oneTapCheckinOk() {
-    // no state race: write directly as IN
     await saveAttendance({ autoClose: true, presentOverride: true });
   }
 
+  // ✅ FIXED PAYMENT
   async function addPayment(amt) {
-    const amount = Number(amt);
     if (!canLoad) return;
-    if (!amount || Number.isNaN(amount) || amount <= 0) {
+
+    const amount = parseAmount(amt);
+    if (!Number.isFinite(amount) || amount <= 0) {
       setErr("ΒΑΛΕ ΠΟΣΟ > 0");
       return;
     }
@@ -375,14 +387,19 @@ export default function ScanCard() {
     setErr("");
 
     try {
-      const { error } = await supabase.from("payments").insert({
+      const payload = {
         trip_id: tripId,
         participant_id: participantId,
+        scope: "BUS",
+        kind: "PAYMENT",
         amount,
+        currency: "EUR",
         method: payMethod,
-        receipt: !!receipt,
-      });
+        status: "COMPLETED",
+        description: "BUS PAYMENT (FIELD)",
+      };
 
+      const { error } = await supabase.from("payments").insert(payload);
       if (error) throw error;
 
       setToast("OK");
@@ -396,16 +413,16 @@ export default function ScanCard() {
     }
   }
 
-  async function markLoanReturned(loanId) {
-    if (!loanId) return;
+  // ✅ NEW: Return via RPC (not updating view)
+  async function markLoanReturned(allocationId) {
+    if (!allocationId) return;
     setBusy(true);
     setErr("");
 
     try {
-      const { error } = await supabase
-        .from(EQUIPMENT_LOANS_TABLE)
-        .update({ status: "RETURNED" })
-        .eq("id", loanId);
+      const { error } = await supabase.rpc(EQUIPMENT_RETURN_RPC, {
+        p_allocation_id: allocationId,
+      });
 
       if (error) throw error;
 
@@ -641,7 +658,6 @@ export default function ScanCard() {
         {/* PANELS */}
         {!loading && activePanel !== "home" ? (
           <div className="mt-3 rounded-3xl border border-slate-200 bg-white p-4">
-            {/* PANEL HEADER */}
             <div className="flex items-center justify-between gap-2">
               <div className="text-[11px] font-extrabold tracking-wide text-slate-500">
                 {activePanel === "confirm"
@@ -826,6 +842,7 @@ export default function ScanCard() {
                     ))}
                   </div>
 
+                  {/* UI only */}
                   <label className="mt-2 inline-flex items-center gap-2 text-xs font-extrabold text-slate-700">
                     <input
                       type="checkbox"
@@ -889,9 +906,12 @@ export default function ScanCard() {
                 ) : (
                   <div className="space-y-2">
                     {loans.map((l) => {
-                      const label = l.set_name || l.item_name || "—";
                       const status = safeUpper(l.status || "—");
                       const qty = Number(l.qty || 0);
+
+                      const label = l.item_name
+                        ? `${l.item_name}${l.item_code ? ` (${l.item_code})` : ""}`
+                        : l.item_code || "—";
 
                       return (
                         <div
@@ -938,31 +958,11 @@ export default function ScanCard() {
             {activePanel === "info" ? (
               <div className="mt-3">
                 <div className="grid grid-cols-1 gap-2">
-                  <InfoRow
-                    label="ΟΝΟΜΑ"
-                    value={safeUpper(name)}
-                    icon={<User className="w-4 h-4" />}
-                  />
-                  <InfoRow
-                    label="ΤΗΛ"
-                    value={phone || "—"}
-                    icon={<Phone className="w-4 h-4" />}
-                  />
-                  <InfoRow
-                    label="EMAIL"
-                    value={email || "—"}
-                    icon={<Mail className="w-4 h-4" />}
-                  />
-                  <InfoRow
-                    label="BUS"
-                    value={busCode ? safeUpper(busCode) : "—"}
-                    icon={<Bus className="w-4 h-4" />}
-                  />
-                  <InfoRow
-                    label="SEAT"
-                    value={seat ? safeUpper(seat) : "—"}
-                    icon={<Bus className="w-4 h-4" />}
-                  />
+                  <InfoRow label="ΟΝΟΜΑ" value={safeUpper(name)} icon={<User className="w-4 h-4" />} />
+                  <InfoRow label="ΤΗΛ" value={phone || "—"} icon={<Phone className="w-4 h-4" />} />
+                  <InfoRow label="EMAIL" value={email || "—"} icon={<Mail className="w-4 h-4" />} />
+                  <InfoRow label="BUS" value={busCode ? safeUpper(busCode) : "—"} icon={<Bus className="w-4 h-4" />} />
+                  <InfoRow label="SEAT" value={seat ? safeUpper(seat) : "—"} icon={<Bus className="w-4 h-4" />} />
                   <InfoRow
                     label="NOTES"
                     value={participant?.notes ? String(participant.notes) : "—"}

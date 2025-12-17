@@ -45,9 +45,7 @@ export default function FrontEquipmentView() {
       // Rows
       const { data: r, error: rErr } = await supabase
         .from("front_equipment_active_v1")
-        .select(
-          "item_code, item_name, category, used_qty, available_now, status"
-        )
+        .select("item_code, item_name, category, used_qty, available_now, status")
         .order("status", { ascending: true })
         .order("item_name", { ascending: true });
 
@@ -213,17 +211,22 @@ export default function FrontEquipmentView() {
             <ul className="divide-y divide-slate-100">
               {filtered.map((r, idx) => (
                 <li key={`${r.item_code}-${idx}`} className="px-4 md:px-6 py-3">
-                  <div className="flex items-center justify-between gap-3">
+                  {/* ✅ MOBILE: 2 ROWS / DESKTOP: 1 ROW */}
+                  <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between md:gap-3">
+                    {/* LEFT */}
                     <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-semibold text-slate-500">
+                      {/* Row 1: CODE + NAME (always readable on mobile) */}
+                      <div className="flex items-baseline gap-3 min-w-0">
+                        <span className="text-xs font-semibold text-slate-500 shrink-0">
                           {r.item_code || "—"}
                         </span>
-                        <span className="text-sm font-semibold text-slate-900 truncate">
+                        <span className="text-sm font-extrabold text-slate-900 truncate min-w-0">
                           {r.item_name || "—"}
                         </span>
                       </div>
-                      <div className="mt-1 text-xs text-slate-600">
+
+                      {/* Row 2: META */}
+                      <div className="text-xs text-slate-600">
                         {r.category || "—"} • ΧΡΗΣΗ:{" "}
                         <span className="font-semibold text-slate-900">
                           {r.used_qty ?? 0}
@@ -231,13 +234,15 @@ export default function FrontEquipmentView() {
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2 shrink-0">
-                      <div className="text-right">
+                    {/* RIGHT (mobile goes to 2nd line naturally) */}
+                    <div className="flex items-center justify-between md:justify-end gap-3 md:min-w-[220px] shrink-0">
+                      <div className="flex items-baseline gap-2">
                         <div className="text-xs text-slate-500">ΔΙΑΘΕΣΙΜΟ</div>
                         <div className="text-sm font-extrabold text-slate-900">
                           {r.available_now ?? 0}
                         </div>
                       </div>
+
                       <StatusPill status={r.status} />
                     </div>
                   </div>
@@ -291,7 +296,9 @@ function SummaryCard({ label, value, tone, onClick, active }) {
         active ? t.ring : "ring-transparent"
       } active:scale-[0.99] transition`}
     >
-      <div className={`text-[11px] font-semibold tracking-wide uppercase ${t.sub}`}>
+      <div
+        className={`text-[11px] font-semibold tracking-wide uppercase ${t.sub}`}
+      >
         {label}
       </div>
       <div className={`mt-2 text-3xl font-extrabold ${t.text}`}>{value}</div>

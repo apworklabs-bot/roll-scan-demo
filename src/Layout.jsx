@@ -233,10 +233,10 @@ export default function Layout({ children }) {
               <span>Dashboard</span>
             </NavLink>
 
-            <NavLink to="/live-attendance" className={navClass} onClick={closeMobile}>
+            {/*<NavLink to="/live-attendance" className={navClass} onClick={closeMobile}>
               <Wifi size={18} />
               <span>Live Attendance</span>
-            </NavLink>
+            </NavLink>*/}
 
             <NavLink to="/scanner" className={navClass} onClick={closeMobile}>
               <ScanLine size={18} />

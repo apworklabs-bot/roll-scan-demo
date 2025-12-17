@@ -15,7 +15,7 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 
 /** FRONT ROUTES */
-const ROUTE_EQUIPMENT = "/equipmentview";     // ✅ FRONT read-only
+const ROUTE_EQUIPMENT = "/equipmentview"; // ✅ FRONT read-only
 const ROUTE_PARTICIPANTS = "/participantsview"; // ✅ FRONT read-only (ParticipantsFront)
 
 export default function Dashboard() {
@@ -35,6 +35,7 @@ export default function Dashboard() {
     let cancelled = false;
 
     async function loadDashboard() {
+      // 1) ACTIVE TRIPS
       const { data: trips, error: tripsErr } = await supabase
         .from("trips")
         .select("id, name, start_date, status")
@@ -70,20 +71,23 @@ export default function Dashboard() {
         return;
       }
 
+      // 2) TOTAL PARTICIPANTS (active trips)
       const { count: participantsCount, error: pcErr } = await supabase
         .from("participants")
         .select("id", { count: "exact", head: true })
         .in("trip_id", tripIds);
       if (pcErr) console.error("Dashboard: participantsCount error", pcErr);
 
+      // 3) CHECKINS TODAY (attendance_logs uses scanned_at + source)
       const today = new Date().toISOString().slice(0, 10);
       const { count: checkinsToday, error: ctErr } = await supabase
         .from("attendance_logs")
         .select("id", { count: "exact", head: true })
-        .eq("method", "QR")
-        .gte("created_at", `${today}T00:00:00`);
+        .in("trip_id", tripIds)
+        .gte("scanned_at", `${today}T00:00:00`);
       if (ctErr) console.error("Dashboard: checkinsToday error", ctErr);
 
+      // 4) BUS PAYMENTS (participants uses arrival_mode + payment_status)
       const { count: busPayments, error: bpErr } = await supabase
         .from("participants")
         .select("id", { count: "exact", head: true })
@@ -92,10 +96,10 @@ export default function Dashboard() {
         .in("trip_id", tripIds);
       if (bpErr) console.error("Dashboard: busPayments error", bpErr);
 
+      // 5) PRESENT COUNT PER TRIP (unique participant_id in logs)
       const { data: attendance, error: attErr } = await supabase
         .from("attendance_logs")
         .select("trip_id, participant_id")
-        .eq("method", "QR")
         .in("trip_id", tripIds);
       if (attErr) console.error("Dashboard: attendance error", attErr);
 
@@ -111,20 +115,43 @@ export default function Dashboard() {
         presentCount: presentMap[t.id]?.size || 0,
       }));
 
-      const { data: activity, error: actErr } = await supabase
+      // 6) RECENT ACTIVITY (NO JOIN -> avoids relationship errors)
+      const { data: logs, error: logsErr } = await supabase
         .from("attendance_logs")
-        .select(
-          `
-          id,
-          created_at,
-          participants:participant_id ( full_name )
-        `
-        )
-        .eq("method", "QR")
+        .select("id, scanned_at, participant_id, trip_id, source, event_type")
         .in("trip_id", tripIds)
-        .order("created_at", { ascending: false })
+        .order("scanned_at", { ascending: false })
         .limit(10);
-      if (actErr) console.error("Dashboard: recentActivity error", actErr);
+
+      if (logsErr) console.error("Dashboard: recentActivity logs error", logsErr);
+
+      // fetch participant names for those logs
+      const pids = Array.from(
+        new Set((logs || []).map((l) => l.participant_id).filter(Boolean))
+      );
+
+      let participantsById = {};
+      if (pids.length > 0) {
+        const { data: ps, error: psErr } = await supabase
+          .from("participants")
+          .select("id, full_name")
+          .in("id", pids);
+
+        if (psErr) console.error("Dashboard: recentActivity participants error", psErr);
+        (ps || []).forEach((p) => {
+          participantsById[p.id] = p;
+        });
+      }
+
+      const activity = (logs || []).map((l) => ({
+        id: l.id,
+        scanned_at: l.scanned_at,
+        source: l.source,
+        event_type: l.event_type,
+        participants: {
+          full_name: participantsById[l.participant_id]?.full_name || "—",
+        },
+      }));
 
       if (cancelled) return;
 
@@ -160,37 +187,16 @@ export default function Dashboard() {
           </h1>
 
           <p className="mt-1 text-sm md:text-base text-slate-600">
-            Μια γρήγορη εικόνα για τις εκδρομές, τις παρουσίες και τις κινήσεις
-            σου.
+            Μια γρήγορη εικόνα για τις εκδρομές, τις παρουσίες και τις κινήσεις σου.
           </p>
         </header>
 
         {/* METRICS */}
         <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-          <FrontMetric
-            icon={MapPin}
-            label="ΕΝΕΡΓΕΣ ΕΚΔΡΟΜΕΣ"
-            value={metrics.activeTrips}
-            tone="orange"
-          />
-          <FrontMetric
-            icon={Users}
-            label="ΣΥΜΜΕΤΕΧΟΝΤΕΣ"
-            value={metrics.totalParticipants}
-            tone="fuchsia"
-          />
-          <FrontMetric
-            icon={CheckCircle2}
-            label="CHECK-INS ΣΗΜΕΡΑ"
-            value={metrics.checkinsToday}
-            tone="emerald"
-          />
-          <FrontMetric
-            icon={Bus}
-            label="ΠΛΗΡΩΜΕΣ ΛΕΩΦΟΡΕΙΟΥ"
-            value={metrics.busPayments}
-            tone="emerald2"
-          />
+          <FrontMetric icon={MapPin} label="ΕΝΕΡΓΕΣ ΕΚΔΡΟΜΕΣ" value={metrics.activeTrips} tone="orange" />
+          <FrontMetric icon={Users} label="ΣΥΜΜΕΤΕΧΟΝΤΕΣ" value={metrics.totalParticipants} tone="fuchsia" />
+          <FrontMetric icon={CheckCircle2} label="CHECK-INS ΣΗΜΕΡΑ" value={metrics.checkinsToday} tone="emerald" />
+          <FrontMetric icon={Bus} label="ΠΛΗΡΩΜΕΣ ΛΕΩΦΟΡΕΙΟΥ" value={metrics.busPayments} tone="emerald2" />
         </section>
 
         {/* QUICK ACCESS */}
@@ -220,24 +226,20 @@ export default function Dashboard() {
 
         {/* LISTS */}
         <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Active Trips (report only, no click) */}
+          {/* Active Trips */}
           <div className="bg-white/80 backdrop-blur rounded-3xl shadow-sm border border-orange-100 px-4 py-4 md:px-6 md:py-5">
             <div className="flex items-center gap-2 mb-3">
               <div className="w-9 h-9 rounded-2xl bg-orange-100 flex items-center justify-center">
                 <MapPin className="w-4 h-4 text-orange-500" />
               </div>
               <div>
-                <p className="text-base font-semibold text-slate-900">
-                  Ενεργές Εκδρομές
-                </p>
+                <p className="text-base font-semibold text-slate-900">Ενεργές Εκδρομές</p>
                 <p className="text-xs text-slate-600">Καθαρά ενημερωτικό</p>
               </div>
             </div>
 
             {activeTrips.length === 0 ? (
-              <p className="text-sm text-slate-600">
-                Δεν υπάρχουν ενεργές εκδρομές.
-              </p>
+              <p className="text-sm text-slate-600">Δεν υπάρχουν ενεργές εκδρομές.</p>
             ) : (
               <div className="space-y-3">
                 {activeTrips.map((t) => (
@@ -280,23 +282,15 @@ export default function Dashboard() {
                 <Activity className="w-4 h-4 text-orange-500" />
               </div>
               <div>
-                <p className="text-base font-semibold text-slate-900">
-                  Πρόσφατη Δραστηριότητα
-                </p>
-                <p className="text-xs text-slate-600">
-                  QR scans (τελευταία 10)
-                </p>
+                <p className="text-base font-semibold text-slate-900">Πρόσφατη Δραστηριότητα</p>
+                <p className="text-xs text-slate-600">Scans (τελευταία 10)</p>
               </div>
             </div>
 
             {recentActivity.length === 0 ? (
               <div className="rounded-2xl bg-white border border-slate-100 px-4 py-4">
-                <p className="text-sm font-semibold text-slate-900">
-                  Ήρεμα προς το παρόν 🙂
-                </p>
-                <p className="text-xs text-slate-600 mt-1">
-                  Δεν υπάρχει πρόσφατη δραστηριότητα.
-                </p>
+                <p className="text-sm font-semibold text-slate-900">Ήρεμα προς το παρόν 🙂</p>
+                <p className="text-xs text-slate-600 mt-1">Δεν υπάρχει πρόσφατη δραστηριότητα.</p>
               </div>
             ) : (
               <div className="max-h-[360px] overflow-y-auto overscroll-contain space-y-3 pr-1">
@@ -315,16 +309,14 @@ export default function Dashboard() {
                           {a?.participants?.full_name || "—"}
                         </p>
                         <p className="text-[11px] text-slate-500">
-                          {a?.created_at
-                            ? new Date(a.created_at).toLocaleString("el-GR")
-                            : ""}
+                          {a?.scanned_at ? new Date(a.scanned_at).toLocaleString("el-GR") : ""}
                         </p>
                       </div>
                     </div>
 
                     <span className="shrink-0 inline-flex items-center gap-1 rounded-full bg-slate-100 text-slate-700 text-[11px] px-3 py-1 font-semibold">
                       <QrCode className="w-3 h-3" />
-                      QR SCAN
+                      SCAN
                     </span>
                   </div>
                 ))}
