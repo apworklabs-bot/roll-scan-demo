@@ -65,19 +65,15 @@ function beep({ freq = 880, ms = 110, volume = 0.18, type = "sine" } = {}) {
         ctx.close?.();
       } catch {}
     }, ms + 60);
-  } catch {
-    // ignore
-  }
+  } catch {}
 }
 
-// uuid v4-ish (accepts general uuid)
 function isUuid(v) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
     String(v || "").trim()
   );
 }
 
-// Accept “token-like” strings (uuid OR shortish alnum/_/-)
 function isTokenLike(v) {
   const s = String(v || "").trim();
   if (!s) return false;
@@ -91,7 +87,7 @@ export default function Scanner() {
 
   // Trips are OPTIONAL now (only for manual filtering)
   const [trips, setTrips] = useState([]);
-  const [tripId, setTripId] = useState(""); // optional filter
+  const [tripId, setTripId] = useState("");
   const [loadingTrips, setLoadingTrips] = useState(false);
 
   // Manual / token UI
@@ -125,21 +121,29 @@ export default function Scanner() {
 
   // ANTI DOUBLE-FIRE
   const lastTokenRef = useRef({ token: "", ts: 0 });
-
-  // HARD GATE (so camera callback doesn't spam async lookups)
   const lookupLockRef = useRef(false);
 
-  // AUTO-RESUME: remember if camera should re-open when returning from ScanCard
+  // AUTO-RESUME
   const autoResumeRef = useRef(false);
 
-  // ✅ HARD ROUTE LIFETIME GUARDS
+  // HARD LIFETIME
   const isMountedRef = useRef(true);
   const lastNavRef = useRef(0);
 
-  // ✅ IMPORTANT: avoid stale "location" inside camera callbacks
+  // STALE LOCATION FIX
   const pathnameRef = useRef(location.pathname);
+  useEffect(() => {
+    pathnameRef.current = location.pathname;
+  }, [location.pathname]);
+  const onScannerNow = () => pathnameRef.current.startsWith("/scanner");
 
-  // Manual panel control (open ONLY when user taps MANUAL)
+  // WATCHDOG / DEBUG
+  const lastDecodeAtRef = useRef(0);
+  const decodeErrorsRef = useRef(0);
+  const watchdogTimerRef = useRef(null);
+  const startSeqRef = useRef(0);
+
+  // Manual panel control
   const [manualOpen, setManualOpen] = useState(false);
   const manualWrapRef = useRef(null);
   const manualInputRef = useRef(null);
@@ -148,12 +152,6 @@ export default function Scanner() {
     () => trips.find((t) => t.id === tripId) || null,
     [trips, tripId]
   );
-
-  const onScannerNow = () => pathnameRef.current.startsWith("/scanner");
-
-  useEffect(() => {
-    pathnameRef.current = location.pathname;
-  }, [location.pathname]);
 
   useEffect(() => {
     const onOn = () => setOnline(true);
@@ -177,8 +175,7 @@ export default function Scanner() {
 
       if (error) throw error;
 
-      const rows = Array.isArray(data) ? data : [];
-      setTrips(rows);
+      setTrips(Array.isArray(data) ? data : []);
     } catch (e) {
       console.error(e);
       setErr(e?.message || "ΣΦΑΛΜΑ ΦΟΡΤΩΣΗΣ ΕΚΔΡΟΜΩΝ");
@@ -203,14 +200,45 @@ export default function Scanner() {
     if (soundOn) beep({ freq: 260, ms: 140, type: "square", volume: 0.14 });
   }
 
+  function stopWatchdog() {
+    if (watchdogTimerRef.current) {
+      clearInterval(watchdogTimerRef.current);
+      watchdogTimerRef.current = null;
+    }
+  }
+
+  function startWatchdog(seqId) {
+    stopWatchdog();
+    watchdogTimerRef.current = setInterval(() => {
+      // only for current run
+      if (startSeqRef.current !== seqId) return;
+      if (!isMountedRef.current) return;
+      if (!onScannerNow()) return;
+      if (!cameraOn) return;
+      if (cameraBusy) return;
+
+      const msSince = Date.now() - (lastDecodeAtRef.current || 0);
+
+      // if we never decoded anything after start OR stuck for too long => restart
+      if (!lastDecodeAtRef.current || msSince > 3500) {
+        // soft restart once; if repeats, fallback will kick in
+        console.warn("[SCANNER] WATCHDOG RESTART", { msSince });
+        startCamera(true);
+      }
+    }, 1200);
+  }
+
   // ---------------------------------------------------------
-  // CAMERA STOP (HARD KILL: reader + tracks + srcObject)
-  // ✅ ALSO unlock locks (fix "CAMERA ON but dead")
+  // CAMERA STOP (HARD KILL)
   // ---------------------------------------------------------
   function stopCamera() {
-    // ✅ unlock everything
+    stopWatchdog();
+
+    // unlock EVERYTHING (fix "camera on but dead")
     lookupLockRef.current = false;
     lastTokenRef.current = { token: "", ts: 0 };
+    lastDecodeAtRef.current = 0;
+    decodeErrorsRef.current = 0;
 
     try {
       readerRef.current?.reset?.();
@@ -235,34 +263,29 @@ export default function Scanner() {
   }
 
   // ---------------------------------------------------------
-  // ✅ MOUNT/UNMOUNT + HARD STOP ON LEAVE /scanner*
+  // MOUNT/UNMOUNT + HARD STOP ON LEAVE /scanner*
   // ---------------------------------------------------------
   useEffect(() => {
     isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
       stopCamera();
-      lookupLockRef.current = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    // ✅ startsWith: handles /scanner, /scanner/, /scanner?...
     if (!location.pathname.startsWith("/scanner")) {
       stopCamera();
-      lookupLockRef.current = false;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname]);
 
-  // ✅ OPEN SCAN CARD (FULL SCREEN)
   function goParticipant(tripIdToUse, participantId, scanMethod) {
     const t = String(tripIdToUse || "").trim();
     const p = String(participantId || "").trim();
     if (!t || !p) return;
 
-    // ✅ NAV DEBOUNCE (prevents scan spam re-opening ScanCard)
     const now = Date.now();
     if (now - lastNavRef.current < 1200) return;
     lastNavRef.current = now;
@@ -279,13 +302,9 @@ export default function Scanner() {
     );
   }
 
-  // ---------------------------------------------------------
-  // QR / STRING LOOKUP
-  // ---------------------------------------------------------
   function extractToken(text) {
     const raw = String(text || "").trim();
     if (!raw) return "";
-
     const first = raw.split(/\s+/)[0];
 
     try {
@@ -325,7 +344,6 @@ export default function Scanner() {
         if (isTokenLike(cand)) return cand.trim();
       }
     }
-
     return first;
   }
 
@@ -373,7 +391,6 @@ export default function Scanner() {
   }
 
   async function handleToken(rawToken, scanMethod = "QR") {
-    // ✅ ABSOLUTE GUARDS (kills “page switching like crazy”)
     if (!isMountedRef.current) return;
     if (!onScannerNow()) return;
     if (scanMethod === "QR" && !cameraOn) return;
@@ -386,10 +403,9 @@ export default function Scanner() {
     lookupLockRef.current = true;
 
     const now = Date.now();
-    // ✅ stronger anti double-fire (android)
     if (
       lastTokenRef.current.token === t &&
-      now - lastTokenRef.current.ts < 4000
+      now - lastTokenRef.current.ts < 2500
     ) {
       lookupLockRef.current = false;
       return;
@@ -425,13 +441,16 @@ export default function Scanner() {
   }
 
   // ---------------------------------------------------------
-  // CAMERA START (ZXING)
-  // ✅ use decodeFromConstraints (environment camera) for iOS/Android stability
-  // ✅ also increases decode consistency
+  // CAMERA START (ZXING) with WATCHDOG + FALLBACK
+  // - 1st try: decodeFromConstraints (environment)
+  // - fallback: decodeFromVideoDevice (pick back camera)
   // ---------------------------------------------------------
-  async function startCamera() {
-    if (cameraOn || cameraBusy) return;
+  async function startCamera(isRestart = false) {
+    if (cameraBusy) return;
     if (!onScannerNow()) return;
+
+    const seqId = Date.now();
+    startSeqRef.current = seqId;
 
     setErr("");
     setInfo("");
@@ -440,18 +459,21 @@ export default function Scanner() {
     try {
       if (!videoRef.current) throw new Error("NO VIDEO ELEMENT");
 
-      // ✅ hard reset previous session (fixes "camera on but not scanning")
+      // Always hard reset before (fix stuck sessions)
       stopCamera();
 
       const reader = new BrowserMultiFormatReader();
-      try {
-        // some builds support it; ignore if not
-        reader.timeBetweenDecodingAttempts = 120;
-      } catch {}
       readerRef.current = reader;
+
+      lastDecodeAtRef.current = 0;
+      decodeErrorsRef.current = 0;
 
       setCameraOn(true);
 
+      // Start watchdog AFTER we mark camera on
+      startWatchdog(seqId);
+
+      // Try constraints first
       const constraints = {
         audio: false,
         video: {
@@ -461,32 +483,74 @@ export default function Scanner() {
         },
       };
 
-      await reader.decodeFromConstraints(
-        constraints,
-        videoRef.current,
-        (result, _error) => {
-          if (!isMountedRef.current) return;
-          if (!onScannerNow()) return;
+      let usedFallback = false;
 
-          if (result?.getText) {
-            const text = String(result.getText() || "").trim();
-            if (text) handleToken(text, "QR");
+      try {
+        await reader.decodeFromConstraints(
+          constraints,
+          videoRef.current,
+          (result, _error) => {
+            if (!isMountedRef.current) return;
+            if (!onScannerNow()) return;
+            if (startSeqRef.current !== seqId) return;
+
+            if (result?.getText) {
+              lastDecodeAtRef.current = Date.now();
+              const text = String(result.getText() || "").trim();
+              if (text) handleToken(text, "QR");
+            }
           }
-        }
-      );
+        );
+      } catch (e) {
+        // fallback to video device selection
+        usedFallback = true;
+        console.warn("[SCANNER] constraints failed -> fallback", e);
 
-      setInfo("ΚΑΜΕΡΑ ΕΝΕΡΓΗ. ΣΤΟΧΕΥΣΕ ΣΤΟ QR.");
+        let deviceId;
+        try {
+          const devices = await BrowserMultiFormatReader.listVideoInputDevices();
+          const byLabel =
+            devices.find((d) =>
+              /back|rear|environment/i.test(String(d.label || ""))
+            ) || null;
+
+          if (byLabel?.deviceId) deviceId = byLabel.deviceId;
+          else if (devices.length > 0)
+            deviceId = devices[devices.length - 1].deviceId;
+        } catch {}
+
+        await reader.decodeFromVideoDevice(
+          deviceId || undefined,
+          videoRef.current,
+          (result, _error) => {
+            if (!isMountedRef.current) return;
+            if (!onScannerNow()) return;
+            if (startSeqRef.current !== seqId) return;
+
+            if (result?.getText) {
+              lastDecodeAtRef.current = Date.now();
+              const text = String(result.getText() || "").trim();
+              if (text) handleToken(text, "QR");
+            }
+          }
+        );
+      }
+
+      if (isRestart) {
+        setInfo(usedFallback ? "CAMERA RESTART (FALLBACK)" : "CAMERA RESTART");
+      } else {
+        setInfo("ΚΑΜΕΡΑ ΕΝΕΡΓΗ. ΣΤΟΧΕΥΣΕ ΣΤΟ QR.");
+      }
     } catch (e) {
       console.error(e);
       feedbackError();
-      setErr(
-        "ΔΕΝ ΑΝΟΙΞΕ Η ΚΑΜΕΡΑ. ΕΛΕΓΞΕ PERMISSIONS / HTTPS (Η ΣΤΟ LOCALHOST)."
-      );
+      setErr("CAMERA FAILED. CHECK PERMISSIONS / HTTPS.");
       setCameraOn(false);
       try {
         readerRef.current?.reset?.();
       } catch {}
       readerRef.current = null;
+      stopWatchdog();
     } finally {
       setCameraBusy(false);
     }
@@ -501,26 +565,17 @@ export default function Scanner() {
 
       const caps = track.getCapabilities?.();
       if (!caps?.torch) {
-        setErr("FLASH ΔΕΝ ΥΠΟΣΤΗΡΙΖΕΤΑΙ ΣΕ ΑΥΤΗ ΤΗ ΣΥΣΚΕΥΗ.");
+        setErr("FLASH NOT SUPPORTED.");
         return;
       }
 
       await track.applyConstraints({ advanced: [{ torch: !!next }] });
       setTorchOn(!!next);
     } catch {
-      setErr("FLASH ΔΕΝ ΕΝΕΡΓΟΠΟΙΗΘΗΚΕ.");
+      setErr("FLASH FAILED.");
     }
   }
 
-  // cleanup on unmount (extra safety)
-  useEffect(() => {
-    return () => stopCamera();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // ---------------------------------------------------------
-  // MANUAL SEARCH
-  // ---------------------------------------------------------
   async function handleSearch() {
     const qq = String(q || "").trim();
     if (qq.length < 2) {
@@ -581,9 +636,6 @@ export default function Scanner() {
     }, 50);
   }
 
-  // ---------------------------------------------------------
-  // AUTO-RESUME CAMERA when coming back from ScanCard
-  // ---------------------------------------------------------
   useEffect(() => {
     const wantsResume = !!location.state?.resume;
 
@@ -598,16 +650,14 @@ export default function Scanner() {
       navigate("/scanner", { replace: true, state: {} });
 
       const shouldResume = autoResumeRef.current || wantsResume;
-
       if (shouldResume) {
-        setTimeout(() => {
-          startCamera();
-        }, 120);
+        setTimeout(() => startCamera(false), 180);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.key]);
 
+  // -------- UI --------
   return (
     <div className="min-h-[100dvh] bg-transparent">
       <div className="w-full max-w-none mx-auto px-3 pt-3 pb-28">
@@ -625,11 +675,7 @@ export default function Scanner() {
                   : "bg-amber-50 border-amber-200 text-amber-800"
               )}
             >
-              {online ? (
-                <Wifi className="w-4 h-4" />
-              ) : (
-                <WifiOff className="w-4 h-4" />
-              )}
+              {online ? <Wifi className="w-4 h-4" /> : <WifiOff className="w-4 h-4" />}
               {online ? "ONLINE" : "OFFLINE"}
             </div>
           </div>
@@ -643,10 +689,16 @@ export default function Scanner() {
         ) : null}
 
         {info ? (
-          <div className="mb-3 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-[12px] font-bold text-slate-700">
+          <div className="mb-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-[12px] font-bold text-slate-700">
             {info}
           </div>
         ) : null}
+
+        {/* tiny debug line */}
+        <div className="mb-3 text-[11px] text-slate-500 font-semibold">
+          DEBUG: CAM={cameraOn ? "ON" : "OFF"} BUSY={cameraBusy ? "1" : "0"} LAST_DECODE=
+          {lastDecodeAtRef.current ? `${Math.max(0, Math.floor((Date.now() - lastDecodeAtRef.current) / 1000))}s` : "NONE"}
+        </div>
 
         <div className="rounded-3xl border border-slate-200 bg-white overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
@@ -678,17 +730,10 @@ export default function Scanner() {
                 onClick={() => setSoundOn((s) => !s)}
                 className={clsx(
                   "inline-flex items-center gap-2 rounded-full px-3 py-2 text-[11px] font-extrabold border bg-white",
-                  soundOn
-                    ? "border-slate-200 text-slate-700"
-                    : "border-slate-200 text-slate-400"
+                  soundOn ? "border-slate-200 text-slate-700" : "border-slate-200 text-slate-400"
                 )}
-                title="SOUND"
               >
-                {soundOn ? (
-                  <Volume2 className="w-4 h-4" />
-                ) : (
-                  <VolumeX className="w-4 h-4" />
-                )}
+                {soundOn ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
                 {soundOn ? "SOUND ON" : "MUTE"}
               </button>
 
@@ -697,11 +742,8 @@ export default function Scanner() {
                 onClick={() => setHapticOn((h) => !h)}
                 className={clsx(
                   "inline-flex items-center gap-2 rounded-full px-3 py-2 text-[11px] font-extrabold border bg-white",
-                  hapticOn
-                    ? "border-slate-200 text-slate-700"
-                    : "border-slate-200 text-slate-400"
+                  hapticOn ? "border-slate-200 text-slate-700" : "border-slate-200 text-slate-400"
                 )}
-                title="HAPTIC"
               >
                 <Vibrate className="w-4 h-4" />
                 {hapticOn ? "HAPTIC ON" : "HAPTIC OFF"}
@@ -711,11 +753,8 @@ export default function Scanner() {
                 type="button"
                 onClick={loadTrips}
                 className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-[11px] font-extrabold text-slate-900"
-                title="ΑΝΑΝΕΩΣΗ"
               >
-                <RefreshCw
-                  className={clsx("w-4 h-4", loadingTrips && "animate-spin")}
-                />
+                <RefreshCw className={clsx("w-4 h-4", loadingTrips && "animate-spin")} />
                 REFRESH
               </button>
             </div>
@@ -772,9 +811,7 @@ export default function Scanner() {
                     </span>
                     <span className="inline-flex items-center gap-1">
                       <Calendar className="w-3 h-3" />
-                      {selectedTrip.start_date
-                        ? String(selectedTrip.start_date).slice(0, 10)
-                        : ""}
+                      {selectedTrip.start_date ? String(selectedTrip.start_date).slice(0, 10) : ""}
                     </span>
                   </div>
                 ) : null}
@@ -837,16 +874,9 @@ export default function Scanner() {
                         <div className="mt-1 text-[11px] text-slate-600 flex flex-wrap gap-3">
                           {p.phone ? <span>ΤΗΛ: {p.phone}</span> : null}
                           {p.email ? <span>EMAIL: {p.email}</span> : null}
-                          {p.bus_code ? (
-                            <span>
-                              BUS: {String(p.bus_code).toUpperCase()}
-                            </span>
-                          ) : null}
+                          {p.bus_code ? <span>BUS: {String(p.bus_code).toUpperCase()}</span> : null}
                           {p.boarding_point ? (
-                            <span>
-                              ΑΦΕΤΗΡΙΑ:{" "}
-                              {String(p.boarding_point).toUpperCase()}
-                            </span>
+                            <span>ΑΦΕΤΗΡΙΑ: {String(p.boarding_point).toUpperCase()}</span>
                           ) : null}
                         </div>
                       </div>
@@ -901,7 +931,7 @@ export default function Scanner() {
         <div className="px-3 py-3 grid grid-cols-3 gap-2">
           <button
             type="button"
-            onClick={() => (cameraOn ? stopCamera() : startCamera())}
+            onClick={() => (cameraOn ? stopCamera() : startCamera(false))}
             className={clsx(
               "rounded-2xl py-3 text-[13px] font-extrabold border inline-flex items-center justify-center gap-2",
               cameraOn
@@ -909,11 +939,7 @@ export default function Scanner() {
                 : "bg-white text-slate-900 border-slate-200"
             )}
           >
-            {cameraOn ? (
-              <Pause className="w-4 h-4" />
-            ) : (
-              <Play className="w-4 h-4" />
-            )}
+            {cameraOn ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
             {cameraOn ? "PAUSE" : "RESUME"}
           </button>
 
@@ -926,11 +952,7 @@ export default function Scanner() {
               !cameraOn && "opacity-50 cursor-not-allowed"
             )}
           >
-            {torchOn ? (
-              <FlashlightOff className="w-4 h-4" />
-            ) : (
-              <Flashlight className="w-4 h-4" />
-            )}
+            {torchOn ? <FlashlightOff className="w-4 h-4" /> : <Flashlight className="w-4 h-4" />}
             FLASH
           </button>
 
