@@ -82,7 +82,6 @@ function isTokenLike(v) {
   const s = String(v || "").trim();
   if (!s) return false;
   if (isUuid(s)) return true;
-  // allow your qr_token formats if not uuid
   return /^[a-zA-Z0-9_-]{6,200}$/.test(s);
 }
 
@@ -191,17 +190,43 @@ export default function Scanner() {
     if (soundOn) beep({ freq: 260, ms: 140, type: "square", volume: 0.14 });
   }
 
+  // ---------------------------------------------------------
+  // CAMERA STOP (CRITICAL FIX: stop tracks so it doesn't scan while you're on other pages)
+  // ---------------------------------------------------------
+  function stopCamera() {
+    // stop ZXing reader loop
+    try {
+      readerRef.current?.reset?.();
+    } catch {}
+    readerRef.current = null;
+
+    // stop actual media stream
+    try {
+      const video = videoRef.current;
+      const stream = video?.srcObject;
+      const tracks = stream?.getTracks?.() || [];
+      tracks.forEach((t) => {
+        try {
+          t.stop();
+        } catch {}
+      });
+      if (video) video.srcObject = null;
+    } catch {}
+
+    setCameraOn(false);
+    setCameraBusy(false);
+    setTorchOn(false);
+  }
+
   // ✅ OPEN SCAN CARD (FULL SCREEN)
-  // ✅ IMPORTANT: PAUSE CAMERA ONLY HERE (when we actually open a card)
+  // ✅ IMPORTANT: stop camera ONLY here (when we actually open a card)
   function goParticipant(tripIdToUse, participantId, scanMethod) {
     const t = String(tripIdToUse || "").trim();
     const p = String(participantId || "").trim();
     if (!t || !p) return;
 
-    // remember if camera was on when we left
     autoResumeRef.current = !!cameraOn;
 
-    // ✅ stop camera ONLY when we successfully navigate to a card
     stopCamera();
 
     navigate(
@@ -217,56 +242,44 @@ export default function Scanner() {
 
   // ---------------------------------------------------------
   // QR / STRING LOOKUP
-  // - supports:
-  //   1) QR = participant UUID (fast + clean)
-  //   2) URL with ?token=... or ?id=...
-  //   3) URL like /pass/:token  ✅ (THIS FIX)
-  //   4) VIEW lookup (participants_qr_lookup) (NO TABLE CHANGES)
   // ---------------------------------------------------------
   function extractToken(text) {
     const raw = String(text || "").trim();
     if (!raw) return "";
 
-    // If it contains whitespace/newlines, keep first token-ish piece
-    // (ZXing sometimes returns extra)
     const first = raw.split(/\s+/)[0];
 
     try {
       const url = new URL(first);
 
-      // 1) Querystring token
       const t = url.searchParams.get("token");
       const id = url.searchParams.get("id");
       if (t && String(t).trim()) return String(t).trim();
       if (id && String(id).trim()) return String(id).trim();
 
-      // 2) Path token: /pass/:token (and any trailing slash)
       const parts = String(url.pathname || "")
         .split("/")
         .filter(Boolean);
 
-      // If URL is .../pass/<token>
       const passIdx = parts.findIndex((p) => p.toLowerCase() === "pass");
       if (passIdx >= 0 && parts[passIdx + 1]) {
         const cand = decodeURIComponent(parts[passIdx + 1]);
         if (isTokenLike(cand)) return String(cand).trim();
       }
 
-      // 3) Fallback: last path segment if token-like
-      const last = parts.length ? decodeURIComponent(parts[parts.length - 1]) : "";
+      const last = parts.length
+        ? decodeURIComponent(parts[parts.length - 1])
+        : "";
       if (isTokenLike(last)) return String(last).trim();
 
-      // If nothing matched, return original
       return first;
     } catch {
-      // Not a URL → try regex forms
       const m1 = first.match(/token=([a-zA-Z0-9_-]+)/);
       if (m1?.[1]) return String(m1[1]).trim();
 
       const m2 = first.match(/id=([0-9a-f-]{36})/i);
       if (m2?.[1]) return String(m2[1]).trim();
 
-      // /pass/<token> without scheme
       const m3 = first.match(/\/pass\/([^/?#]+)/i);
       if (m3?.[1]) {
         const cand = decodeURIComponent(String(m3[1]));
@@ -281,7 +294,6 @@ export default function Scanner() {
     const v = String(value || "").trim();
     if (!v) return null;
 
-    // 1) If UUID: match participants.id directly
     if (isUuid(v)) {
       const { data, error } = await supabase
         .from("participants")
@@ -293,8 +305,6 @@ export default function Scanner() {
       if (data?.id && data?.trip_id) return data;
     }
 
-    // 2) View lookup: participants_qr_lookup (NO TABLE CHANGES)
-    // expected columns: participant_id, trip_id, qr_token
     {
       const { data, error } = await supabase
         .from("participants_qr_lookup")
@@ -308,7 +318,6 @@ export default function Scanner() {
       }
     }
 
-    // 3) Optional fallback: BUS CODE
     {
       const { data, error } = await supabase
         .from("participants")
@@ -329,11 +338,9 @@ export default function Scanner() {
     const t = String(extracted || "").trim();
     if (!t) return;
 
-    // HARD GATE: only one lookup at a time
     if (lookupLockRef.current) return;
     lookupLockRef.current = true;
 
-    // ANTI DOUBLE-FIRE (same token within 1.5s)
     const now = Date.now();
     if (
       lastTokenRef.current.token === t &&
@@ -357,13 +364,10 @@ export default function Scanner() {
         return;
       }
 
-      // ✅ SUCCESS FEEDBACK (only when found)
       feedbackSuccess();
 
-      // Optional: set trip selector (only UI)
       if (found.trip_id && found.trip_id !== tripId) setTripId(found.trip_id);
 
-      // ✅ PAUSE ONLY HERE (inside goParticipant)
       goParticipant(found.trip_id, found.id, scanMethod);
     } catch (e) {
       console.error("QR lookup error:", e);
@@ -376,9 +380,7 @@ export default function Scanner() {
   }
 
   // ---------------------------------------------------------
-  // CAMERA START/STOP (ZXING)
-  // ✅ DO NOT stop camera on decode
-  // ✅ stop ONLY when opening card (goParticipant)
+  // CAMERA START (ZXING)
   // ---------------------------------------------------------
   async function startCamera() {
     if (cameraOn || cameraBusy) return;
@@ -392,15 +394,19 @@ export default function Scanner() {
       const reader = new BrowserMultiFormatReader();
       readerRef.current = reader;
 
-      // Try prefer back camera (if available)
+      // Prefer back cam:
+      // - if labels exist: pick "back"/"rear"/"environment"
+      // - else (iOS): pick LAST device (usually back)
       let deviceId;
       try {
         const devices = await BrowserMultiFormatReader.listVideoInputDevices();
-        const backCam =
+        const byLabel =
           devices.find((d) =>
-            String(d.label || "").toLowerCase().includes("back")
-          ) || devices[0];
-        deviceId = backCam?.deviceId;
+            /back|rear|environment/i.test(String(d.label || ""))
+          ) || null;
+
+        if (byLabel?.deviceId) deviceId = byLabel.deviceId;
+        else if (devices.length > 0) deviceId = devices[devices.length - 1].deviceId;
       } catch {
         deviceId = undefined;
       }
@@ -413,11 +419,7 @@ export default function Scanner() {
         (result, error) => {
           if (result?.getText) {
             const text = String(result.getText() || "").trim();
-            if (text) {
-              // ✅ do NOT stop camera here
-              // ✅ lookup is gated by lookupLockRef (prevents spam)
-              handleToken(text, "QR");
-            }
+            if (text) handleToken(text, "QR");
           } else if (error) {
             // ignore ZXing noise errors
           }
@@ -439,16 +441,6 @@ export default function Scanner() {
     } finally {
       setCameraBusy(false);
     }
-  }
-
-  function stopCamera() {
-    try {
-      readerRef.current?.reset?.();
-    } catch {}
-    readerRef.current = null;
-    setCameraOn(false);
-    setCameraBusy(false);
-    setTorchOn(false);
   }
 
   async function toggleTorch(next) {
@@ -479,8 +471,6 @@ export default function Scanner() {
 
   // ---------------------------------------------------------
   // MANUAL SEARCH
-  // - opens ONLY when user taps MANUAL
-  // - trip filter optional (if empty => search across all trips)
   // ---------------------------------------------------------
   async function handleSearch() {
     const qq = String(q || "").trim();
@@ -528,8 +518,6 @@ export default function Scanner() {
   }
 
   function openManual() {
-    // MANUAL should be explicit action:
-    // pause camera to avoid accidental scans while typing
     stopCamera();
     setManualOpen(true);
 
@@ -545,8 +533,7 @@ export default function Scanner() {
   }
 
   // ---------------------------------------------------------
-  // ✅ AUTO-RESUME CAMERA when coming back from ScanCard
-  //   ScanCard does: navigate("/scanner", { replace:true, state:{ resume:true } })
+  // AUTO-RESUME CAMERA when coming back from ScanCard
   // ---------------------------------------------------------
   useEffect(() => {
     const wantsResume = !!location.state?.resume;
@@ -590,11 +577,7 @@ export default function Scanner() {
                   : "bg-amber-50 border-amber-200 text-amber-800"
               )}
             >
-              {online ? (
-                <Wifi className="w-4 h-4" />
-              ) : (
-                <WifiOff className="w-4 h-4" />
-              )}
+              {online ? <Wifi className="w-4 h-4" /> : <WifiOff className="w-4 h-4" />}
               {online ? "ONLINE" : "OFFLINE"}
             </div>
           </div>
@@ -645,17 +628,11 @@ export default function Scanner() {
                 onClick={() => setSoundOn((s) => !s)}
                 className={clsx(
                   "inline-flex items-center gap-2 rounded-full px-3 py-2 text-[11px] font-extrabold border bg-white",
-                  soundOn
-                    ? "border-slate-200 text-slate-700"
-                    : "border-slate-200 text-slate-400"
+                  soundOn ? "border-slate-200 text-slate-700" : "border-slate-200 text-slate-400"
                 )}
                 title="SOUND"
               >
-                {soundOn ? (
-                  <Volume2 className="w-4 h-4" />
-                ) : (
-                  <VolumeX className="w-4 h-4" />
-                )}
+                {soundOn ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
                 {soundOn ? "SOUND ON" : "MUTE"}
               </button>
 
@@ -664,9 +641,7 @@ export default function Scanner() {
                 onClick={() => setHapticOn((h) => !h)}
                 className={clsx(
                   "inline-flex items-center gap-2 rounded-full px-3 py-2 text-[11px] font-extrabold border bg-white",
-                  hapticOn
-                    ? "border-slate-200 text-slate-700"
-                    : "border-slate-200 text-slate-400"
+                  hapticOn ? "border-slate-200 text-slate-700" : "border-slate-200 text-slate-400"
                 )}
                 title="HAPTIC"
               >
@@ -680,9 +655,7 @@ export default function Scanner() {
                 className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-[11px] font-extrabold text-slate-900"
                 title="ΑΝΑΝΕΩΣΗ"
               >
-                <RefreshCw
-                  className={clsx("w-4 h-4", loadingTrips && "animate-spin")}
-                />
+                <RefreshCw className={clsx("w-4 h-4", loadingTrips && "animate-spin")} />
                 REFRESH
               </button>
             </div>
@@ -813,8 +786,7 @@ export default function Scanner() {
                           ) : null}
                           {p.boarding_point ? (
                             <span>
-                              ΑΦΕΤΗΡΙΑ:{" "}
-                              {String(p.boarding_point).toUpperCase()}
+                              ΑΦΕΤΗΡΙΑ: {String(p.boarding_point).toUpperCase()}
                             </span>
                           ) : null}
                         </div>
@@ -881,11 +853,7 @@ export default function Scanner() {
                 : "bg-white text-slate-900 border-slate-200"
             )}
           >
-            {cameraOn ? (
-              <Pause className="w-4 h-4" />
-            ) : (
-              <Play className="w-4 h-4" />
-            )}
+            {cameraOn ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
             {cameraOn ? "PAUSE" : "RESUME"}
           </button>
 
