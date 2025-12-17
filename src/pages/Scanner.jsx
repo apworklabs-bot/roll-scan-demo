@@ -77,6 +77,15 @@ function isUuid(v) {
   );
 }
 
+// Accept “token-like” strings (uuid OR shortish alnum/_/-)
+function isTokenLike(v) {
+  const s = String(v || "").trim();
+  if (!s) return false;
+  if (isUuid(s)) return true;
+  // allow your qr_token formats if not uuid
+  return /^[a-zA-Z0-9_-]{6,200}$/.test(s);
+}
+
 export default function Scanner() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -211,26 +220,61 @@ export default function Scanner() {
   // - supports:
   //   1) QR = participant UUID (fast + clean)
   //   2) URL with ?token=... or ?id=...
-  //   3) VIEW lookup (participants_qr_lookup) (NO TABLE CHANGES)
+  //   3) URL like /pass/:token  ✅ (THIS FIX)
+  //   4) VIEW lookup (participants_qr_lookup) (NO TABLE CHANGES)
   // ---------------------------------------------------------
   function extractToken(text) {
     const raw = String(text || "").trim();
     if (!raw) return "";
 
+    // If it contains whitespace/newlines, keep first token-ish piece
+    // (ZXing sometimes returns extra)
+    const first = raw.split(/\s+/)[0];
+
     try {
-      const url = new URL(raw);
+      const url = new URL(first);
+
+      // 1) Querystring token
       const t = url.searchParams.get("token");
       const id = url.searchParams.get("id");
-      return (t || id || raw).trim();
+      if (t && String(t).trim()) return String(t).trim();
+      if (id && String(id).trim()) return String(id).trim();
+
+      // 2) Path token: /pass/:token (and any trailing slash)
+      const parts = String(url.pathname || "")
+        .split("/")
+        .filter(Boolean);
+
+      // If URL is .../pass/<token>
+      const passIdx = parts.findIndex((p) => p.toLowerCase() === "pass");
+      if (passIdx >= 0 && parts[passIdx + 1]) {
+        const cand = decodeURIComponent(parts[passIdx + 1]);
+        if (isTokenLike(cand)) return String(cand).trim();
+      }
+
+      // 3) Fallback: last path segment if token-like
+      const last = parts.length ? decodeURIComponent(parts[parts.length - 1]) : "";
+      if (isTokenLike(last)) return String(last).trim();
+
+      // If nothing matched, return original
+      return first;
     } catch {
-      const m1 = raw.match(/token=([a-zA-Z0-9_-]+)/);
+      // Not a URL → try regex forms
+      const m1 = first.match(/token=([a-zA-Z0-9_-]+)/);
       if (m1?.[1]) return String(m1[1]).trim();
 
-      const m2 = raw.match(/id=([0-9a-f-]{36})/i);
+      const m2 = first.match(/id=([0-9a-f-]{36})/i);
       if (m2?.[1]) return String(m2[1]).trim();
+
+      // /pass/<token> without scheme
+      const m3 = first.match(/\/pass\/([^/?#]+)/i);
+      if (m3?.[1]) {
+        const cand = decodeURIComponent(String(m3[1]));
+        if (isTokenLike(cand)) return cand.trim();
+      }
     }
 
-    return raw;
+    return first;
   }
 
   async function lookupParticipantByAnyKey(value) {
