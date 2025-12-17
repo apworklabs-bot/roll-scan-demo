@@ -137,26 +137,10 @@ export default function Scanner() {
   }, [location.pathname]);
   const onScannerNow = () => pathnameRef.current.startsWith("/scanner");
 
-  // WATCHDOG / DEBUG
+  // WATCHDOG
   const lastDecodeAtRef = useRef(0);
-  const decodeErrorsRef = useRef(0);
   const watchdogTimerRef = useRef(null);
   const startSeqRef = useRef(0);
-
-  // DEBUG: callback heartbeat + what we decoded + lookup status
-  const lastCbAtRef = useRef(0);
-  const cbCountRef = useRef(0);
-  const lastRawRef = useRef("");
-  const lastTokRef = useRef("");
-  const lastLookupRef = useRef("NONE"); // NONE / OK / NOT_FOUND / ERROR
-
-  // force UI refresh for debug (so refs show live)
-  const [dbgTick, setDbgTick] = useState(0);
-  useEffect(() => {
-    if (!cameraOn) return;
-    const t = setInterval(() => setDbgTick((x) => x + 1), 500);
-    return () => clearInterval(t);
-  }, [cameraOn]);
 
   // Manual panel control
   const [manualOpen, setManualOpen] = useState(false);
@@ -235,7 +219,6 @@ export default function Scanner() {
 
       // never decoded OR stuck too long => restart
       if (!lastDecodeAtRef.current || msSince > 3500) {
-        console.warn("[SCANNER] WATCHDOG RESTART", { msSince });
         startCamera(true);
       }
     }, 1200);
@@ -247,18 +230,9 @@ export default function Scanner() {
   function stopCamera() {
     stopWatchdog();
 
-    // unlock EVERYTHING (fix "camera on but dead")
     lookupLockRef.current = false;
     lastTokenRef.current = { token: "", ts: 0 };
-
     lastDecodeAtRef.current = 0;
-    decodeErrorsRef.current = 0;
-
-    lastCbAtRef.current = 0;
-    cbCountRef.current = 0;
-    lastRawRef.current = "";
-    lastTokRef.current = "";
-    lastLookupRef.current = "NONE";
 
     try {
       readerRef.current?.reset?.();
@@ -414,10 +388,7 @@ export default function Scanner() {
     if (!isMountedRef.current) return;
     if (!onScannerNow()) return;
 
-    // ✅ FIX: ΜΗΝ ΜΠΛΟΚΑΡΕΙΣ ΤΟ LOOKUP ΑΝ Η ΚΑΜΕΡΑ ΕΚΛΕΙΣΕ ΜΟΛΙΣ ΕΓΙΝΕ DECODE
-    // (ΑΥΤΟ ΣΟΥ ΕΔΙΝΕ LOOKUP=NONE ΕΝΩ ΕΙΧΕΣ TOK)
-    // if (scanMethod === "QR" && !cameraOn) return;
-
+    // ✅ ΔΕΝ μπλοκάρουμε το lookup αν η κάμερα έκλεισε “στο τσακ” μετά το decode
     const extracted = extractToken(rawToken);
     const t = String(extracted || "").trim();
     if (!t) return;
@@ -440,25 +411,20 @@ export default function Scanner() {
     setBusyToken(true);
 
     try {
-      lastLookupRef.current = "NONE";
-
       const found = await lookupParticipantByAnyKey(t);
 
       if (!found?.id || !found?.trip_id) {
-        lastLookupRef.current = "NOT_FOUND";
         feedbackError();
         setErr("ΔΕΝ ΒΡΕΘΗΚΕ ΕΓΚΥΡΟ QR. ΔΟΚΙΜΑΣΕ MANUAL.");
         return;
       }
 
-      lastLookupRef.current = "OK";
       feedbackSuccess();
 
       if (found.trip_id && found.trip_id !== tripId) setTripId(found.trip_id);
 
       goParticipant(found.trip_id, found.id, scanMethod);
     } catch (e) {
-      lastLookupRef.current = "ERROR";
       console.error("QR lookup error:", e);
       feedbackError();
       setErr(e?.message || "ΣΦΑΛΜΑ QR LOOKUP");
@@ -470,8 +436,6 @@ export default function Scanner() {
 
   // ---------------------------------------------------------
   // CAMERA START (ZXING) with WATCHDOG + FALLBACK
-  // - 1st try: decodeFromConstraints (environment)
-  // - fallback: decodeFromVideoDevice (pick back camera)
   // ---------------------------------------------------------
   async function startCamera(isRestart = false) {
     if (cameraBusy) return;
@@ -494,13 +458,6 @@ export default function Scanner() {
       readerRef.current = reader;
 
       lastDecodeAtRef.current = 0;
-      decodeErrorsRef.current = 0;
-
-      lastCbAtRef.current = 0;
-      cbCountRef.current = 0;
-      lastRawRef.current = "";
-      lastTokRef.current = "";
-      lastLookupRef.current = "NONE";
 
       setCameraOn(true);
 
@@ -527,14 +484,8 @@ export default function Scanner() {
             if (!onScannerNow()) return;
             if (startSeqRef.current !== seqId) return;
 
-            lastCbAtRef.current = Date.now();
-            cbCountRef.current += 1;
-
             if (result?.getText) {
               const raw = String(result.getText() || "").trim();
-              lastRawRef.current = raw.slice(0, 120);
-              lastTokRef.current = extractToken(raw).slice(0, 80);
-
               lastDecodeAtRef.current = Date.now();
               if (raw) handleToken(raw, "QR");
             }
@@ -565,14 +516,8 @@ export default function Scanner() {
             if (!onScannerNow()) return;
             if (startSeqRef.current !== seqId) return;
 
-            lastCbAtRef.current = Date.now();
-            cbCountRef.current += 1;
-
             if (result?.getText) {
               const raw = String(result.getText() || "").trim();
-              lastRawRef.current = raw.slice(0, 120);
-              lastTokRef.current = extractToken(raw).slice(0, 80);
-
               lastDecodeAtRef.current = Date.now();
               if (raw) handleToken(raw, "QR");
             }
@@ -581,7 +526,7 @@ export default function Scanner() {
       }
 
       if (isRestart) {
-        setInfo(usedFallback ? "CAMERA RESTART (FALLBACK)" : "CAMERA RESTART");
+        setInfo(usedFallback ? "CAMERA RESTART" : "CAMERA RESTART");
       } else {
         setInfo("ΚΑΜΕΡΑ ΕΝΕΡΓΗ. ΣΤΟΧΕΥΣΕ ΣΤΟ QR.");
       }
@@ -701,17 +646,6 @@ export default function Scanner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.key]);
 
-  const cbAge =
-    lastCbAtRef.current > 0
-      ? Math.max(0, Math.floor((Date.now() - lastCbAtRef.current) / 1000))
-      : null;
-
-  const decodeAge =
-    lastDecodeAtRef.current > 0
-      ? Math.max(0, Math.floor((Date.now() - lastDecodeAtRef.current) / 1000))
-      : null;
-
-  // -------- UI --------
   return (
     <div className="min-h-[100dvh] bg-transparent">
       <div className="w-full max-w-none mx-auto px-3 pt-3 pb-28">
@@ -747,16 +681,6 @@ export default function Scanner() {
             {info}
           </div>
         ) : null}
-
-        {/* DEBUG (ref-based, refreshed by dbgTick) */}
-        <div className="mb-3 text-[11px] text-slate-500 font-semibold">
-          DEBUG[{dbgTick}]: CAM={cameraOn ? "ON" : "OFF"} BUSY={cameraBusy ? "1" : "0"}{" "}
-          LAST_CB={cbAge === null ? "NONE" : `${cbAge}s`} CB_COUNT={cbCountRef.current}{" "}
-          LAST_DECODE={decodeAge === null ? "NONE" : `${decodeAge}s`}{" "}
-          LOOKUP={lastLookupRef.current}{" "}
-          TOK={lastTokRef.current || "—"}{" "}
-          RAW={lastRawRef.current || "—"}
-        </div>
 
         <div className="rounded-3xl border border-slate-200 bg-white overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
@@ -869,7 +793,9 @@ export default function Scanner() {
                     </span>
                     <span className="inline-flex items-center gap-1">
                       <Calendar className="w-3 h-3" />
-                      {selectedTrip.start_date ? String(selectedTrip.start_date).slice(0, 10) : ""}
+                      {selectedTrip.start_date
+                        ? String(selectedTrip.start_date).slice(0, 10)
+                        : ""}
                     </span>
                   </div>
                 ) : null}
@@ -932,9 +858,13 @@ export default function Scanner() {
                         <div className="mt-1 text-[11px] text-slate-600 flex flex-wrap gap-3">
                           {p.phone ? <span>ΤΗΛ: {p.phone}</span> : null}
                           {p.email ? <span>EMAIL: {p.email}</span> : null}
-                          {p.bus_code ? <span>BUS: {String(p.bus_code).toUpperCase()}</span> : null}
+                          {p.bus_code ? (
+                            <span>BUS: {String(p.bus_code).toUpperCase()}</span>
+                          ) : null}
                           {p.boarding_point ? (
-                            <span>ΑΦΕΤΗΡΙΑ: {String(p.boarding_point).toUpperCase()}</span>
+                            <span>
+                              ΑΦΕΤΗΡΙΑ: {String(p.boarding_point).toUpperCase()}
+                            </span>
                           ) : null}
                         </div>
                       </div>
