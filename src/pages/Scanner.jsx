@@ -136,6 +136,9 @@ export default function Scanner() {
   const isMountedRef = useRef(true);
   const lastNavRef = useRef(0);
 
+  // ✅ IMPORTANT: avoid stale "location" inside camera callbacks
+  const pathnameRef = useRef(location.pathname);
+
   // Manual panel control (open ONLY when user taps MANUAL)
   const [manualOpen, setManualOpen] = useState(false);
   const manualWrapRef = useRef(null);
@@ -145,6 +148,12 @@ export default function Scanner() {
     () => trips.find((t) => t.id === tripId) || null,
     [trips, tripId]
   );
+
+  const onScannerNow = () => pathnameRef.current.startsWith("/scanner");
+
+  useEffect(() => {
+    pathnameRef.current = location.pathname;
+  }, [location.pathname]);
 
   useEffect(() => {
     const onOn = () => setOnline(true);
@@ -221,7 +230,7 @@ export default function Scanner() {
   }
 
   // ---------------------------------------------------------
-  // ✅ MOUNT/UNMOUNT + HARD STOP ON LEAVE /scanner
+  // ✅ MOUNT/UNMOUNT + HARD STOP ON LEAVE /scanner*
   // ---------------------------------------------------------
   useEffect(() => {
     isMountedRef.current = true;
@@ -234,7 +243,8 @@ export default function Scanner() {
   }, []);
 
   useEffect(() => {
-    if (location.pathname !== "/scanner") {
+    // ✅ startsWith: handles /scanner, /scanner/, /scanner?...
+    if (!location.pathname.startsWith("/scanner")) {
       stopCamera();
       lookupLockRef.current = false;
     }
@@ -360,7 +370,7 @@ export default function Scanner() {
   async function handleToken(rawToken, scanMethod = "QR") {
     // ✅ ABSOLUTE GUARDS (kills “page switching like crazy”)
     if (!isMountedRef.current) return;
-    if (location.pathname !== "/scanner") return;
+    if (!onScannerNow()) return;
     if (scanMethod === "QR" && !cameraOn) return;
 
     const extracted = extractToken(rawToken);
@@ -372,7 +382,10 @@ export default function Scanner() {
 
     const now = Date.now();
     // ✅ stronger anti double-fire (android)
-    if (lastTokenRef.current.token === t && now - lastTokenRef.current.ts < 4000) {
+    if (
+      lastTokenRef.current.token === t &&
+      now - lastTokenRef.current.ts < 4000
+    ) {
       lookupLockRef.current = false;
       return;
     }
@@ -408,10 +421,11 @@ export default function Scanner() {
 
   // ---------------------------------------------------------
   // CAMERA START (ZXING)
+  // ✅ use decodeFromConstraints (environment camera) for iOS stability
   // ---------------------------------------------------------
   async function startCamera() {
     if (cameraOn || cameraBusy) return;
-    if (location.pathname !== "/scanner") return;
+    if (!onScannerNow()) return;
 
     setErr("");
     setInfo("");
@@ -420,42 +434,30 @@ export default function Scanner() {
     try {
       if (!videoRef.current) throw new Error("NO VIDEO ELEMENT");
 
+      // Hard reset anything previous
+      stopCamera();
+
       const reader = new BrowserMultiFormatReader();
       readerRef.current = reader;
 
-      // Prefer back cam:
-      // - if labels exist: pick "back"/"rear"/"environment"
-      // - else (iOS): pick LAST device (usually back)
-      let deviceId;
-      try {
-        const devices = await BrowserMultiFormatReader.listVideoInputDevices();
-        const byLabel =
-          devices.find((d) =>
-            /back|rear|environment/i.test(String(d.label || ""))
-          ) || null;
-
-        if (byLabel?.deviceId) deviceId = byLabel.deviceId;
-        else if (devices.length > 0)
-          deviceId = devices[devices.length - 1].deviceId;
-      } catch {
-        deviceId = undefined;
-      }
-
       setCameraOn(true);
 
-      await reader.decodeFromVideoDevice(
-        deviceId || undefined,
+      // ✅ best-practice: ask explicitly for back camera
+      const constraints = {
+        video: { facingMode: { ideal: "environment" } },
+        audio: false,
+      };
+
+      await reader.decodeFromConstraints(
+        constraints,
         videoRef.current,
-        (result, error) => {
-          // ✅ kill callbacks if we left scanner / unmounted
+        (result, _error) => {
           if (!isMountedRef.current) return;
-          if (location.pathname !== "/scanner") return;
+          if (!onScannerNow()) return;
 
           if (result?.getText) {
             const text = String(result.getText() || "").trim();
             if (text) handleToken(text, "QR");
-          } else if (error) {
-            // ignore ZXing noise errors
           }
         }
       );
@@ -610,11 +612,7 @@ export default function Scanner() {
                   : "bg-amber-50 border-amber-200 text-amber-800"
               )}
             >
-              {online ? (
-                <Wifi className="w-4 h-4" />
-              ) : (
-                <WifiOff className="w-4 h-4" />
-              )}
+              {online ? <Wifi className="w-4 h-4" /> : <WifiOff className="w-4 h-4" />}
               {online ? "ONLINE" : "OFFLINE"}
             </div>
           </div>
@@ -669,11 +667,7 @@ export default function Scanner() {
                 )}
                 title="SOUND"
               >
-                {soundOn ? (
-                  <Volume2 className="w-4 h-4" />
-                ) : (
-                  <VolumeX className="w-4 h-4" />
-                )}
+                {soundOn ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
                 {soundOn ? "SOUND ON" : "MUTE"}
               </button>
 
@@ -698,9 +692,7 @@ export default function Scanner() {
                 className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-[11px] font-extrabold text-slate-900"
                 title="ΑΝΑΝΕΩΣΗ"
               >
-                <RefreshCw
-                  className={clsx("w-4 h-4", loadingTrips && "animate-spin")}
-                />
+                <RefreshCw className={clsx("w-4 h-4", loadingTrips && "animate-spin")} />
                 REFRESH
               </button>
             </div>
@@ -757,9 +749,7 @@ export default function Scanner() {
                     </span>
                     <span className="inline-flex items-center gap-1">
                       <Calendar className="w-3 h-3" />
-                      {selectedTrip.start_date
-                        ? String(selectedTrip.start_date).slice(0, 10)
-                        : ""}
+                      {selectedTrip.start_date ? String(selectedTrip.start_date).slice(0, 10) : ""}
                     </span>
                   </div>
                 ) : null}
@@ -822,16 +812,9 @@ export default function Scanner() {
                         <div className="mt-1 text-[11px] text-slate-600 flex flex-wrap gap-3">
                           {p.phone ? <span>ΤΗΛ: {p.phone}</span> : null}
                           {p.email ? <span>EMAIL: {p.email}</span> : null}
-                          {p.bus_code ? (
-                            <span>
-                              BUS: {String(p.bus_code).toUpperCase()}
-                            </span>
-                          ) : null}
+                          {p.bus_code ? <span>BUS: {String(p.bus_code).toUpperCase()}</span> : null}
                           {p.boarding_point ? (
-                            <span>
-                              ΑΦΕΤΗΡΙΑ:{" "}
-                              {String(p.boarding_point).toUpperCase()}
-                            </span>
+                            <span>ΑΦΕΤΗΡΙΑ: {String(p.boarding_point).toUpperCase()}</span>
                           ) : null}
                         </div>
                       </div>
@@ -907,11 +890,7 @@ export default function Scanner() {
               !cameraOn && "opacity-50 cursor-not-allowed"
             )}
           >
-            {torchOn ? (
-              <FlashlightOff className="w-4 h-4" />
-            ) : (
-              <Flashlight className="w-4 h-4" />
-            )}
+            {torchOn ? <FlashlightOff className="w-4 h-4" /> : <Flashlight className="w-4 h-4" />}
             FLASH
           </button>
 
