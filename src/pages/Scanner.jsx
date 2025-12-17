@@ -130,7 +130,7 @@ export default function Scanner() {
   const isMountedRef = useRef(true);
   const lastNavRef = useRef(0);
 
-  // STALE LOCATION FIX
+  // STALE LOCATION FIX (critical for iOS callbacks)
   const pathnameRef = useRef(location.pathname);
   useEffect(() => {
     pathnameRef.current = location.pathname;
@@ -142,6 +142,21 @@ export default function Scanner() {
   const decodeErrorsRef = useRef(0);
   const watchdogTimerRef = useRef(null);
   const startSeqRef = useRef(0);
+
+  // DEBUG: callback heartbeat + what we decoded + lookup status
+  const lastCbAtRef = useRef(0);
+  const cbCountRef = useRef(0);
+  const lastRawRef = useRef("");
+  const lastTokRef = useRef("");
+  const lastLookupRef = useRef("NONE"); // NONE / OK / NOT_FOUND / ERROR
+
+  // force UI refresh for debug (so refs show live)
+  const [dbgTick, setDbgTick] = useState(0);
+  useEffect(() => {
+    if (!cameraOn) return;
+    const t = setInterval(() => setDbgTick((x) => x + 1), 500);
+    return () => clearInterval(t);
+  }, [cameraOn]);
 
   // Manual panel control
   const [manualOpen, setManualOpen] = useState(false);
@@ -210,7 +225,6 @@ export default function Scanner() {
   function startWatchdog(seqId) {
     stopWatchdog();
     watchdogTimerRef.current = setInterval(() => {
-      // only for current run
       if (startSeqRef.current !== seqId) return;
       if (!isMountedRef.current) return;
       if (!onScannerNow()) return;
@@ -219,9 +233,8 @@ export default function Scanner() {
 
       const msSince = Date.now() - (lastDecodeAtRef.current || 0);
 
-      // if we never decoded anything after start OR stuck for too long => restart
+      // never decoded OR stuck too long => restart
       if (!lastDecodeAtRef.current || msSince > 3500) {
-        // soft restart once; if repeats, fallback will kick in
         console.warn("[SCANNER] WATCHDOG RESTART", { msSince });
         startCamera(true);
       }
@@ -237,8 +250,15 @@ export default function Scanner() {
     // unlock EVERYTHING (fix "camera on but dead")
     lookupLockRef.current = false;
     lastTokenRef.current = { token: "", ts: 0 };
+
     lastDecodeAtRef.current = 0;
     decodeErrorsRef.current = 0;
+
+    lastCbAtRef.current = 0;
+    cbCountRef.current = 0;
+    lastRawRef.current = "";
+    lastTokRef.current = "";
+    lastLookupRef.current = "NONE";
 
     try {
       readerRef.current?.reset?.();
@@ -417,20 +437,25 @@ export default function Scanner() {
     setBusyToken(true);
 
     try {
+      lastLookupRef.current = "NONE";
+
       const found = await lookupParticipantByAnyKey(t);
 
       if (!found?.id || !found?.trip_id) {
+        lastLookupRef.current = "NOT_FOUND";
         feedbackError();
         setErr("ΔΕΝ ΒΡΕΘΗΚΕ ΕΓΚΥΡΟ QR. ΔΟΚΙΜΑΣΕ MANUAL.");
         return;
       }
 
+      lastLookupRef.current = "OK";
       feedbackSuccess();
 
       if (found.trip_id && found.trip_id !== tripId) setTripId(found.trip_id);
 
       goParticipant(found.trip_id, found.id, scanMethod);
     } catch (e) {
+      lastLookupRef.current = "ERROR";
       console.error("QR lookup error:", e);
       feedbackError();
       setErr(e?.message || "ΣΦΑΛΜΑ QR LOOKUP");
@@ -468,6 +493,12 @@ export default function Scanner() {
       lastDecodeAtRef.current = 0;
       decodeErrorsRef.current = 0;
 
+      lastCbAtRef.current = 0;
+      cbCountRef.current = 0;
+      lastRawRef.current = "";
+      lastTokRef.current = "";
+      lastLookupRef.current = "NONE";
+
       setCameraOn(true);
 
       // Start watchdog AFTER we mark camera on
@@ -494,15 +525,21 @@ export default function Scanner() {
             if (!onScannerNow()) return;
             if (startSeqRef.current !== seqId) return;
 
+            // heartbeat: callback is alive
+            lastCbAtRef.current = Date.now();
+            cbCountRef.current += 1;
+
             if (result?.getText) {
+              const raw = String(result.getText() || "").trim();
+              lastRawRef.current = raw.slice(0, 120);
+              lastTokRef.current = extractToken(raw).slice(0, 80);
+
               lastDecodeAtRef.current = Date.now();
-              const text = String(result.getText() || "").trim();
-              if (text) handleToken(text, "QR");
+              if (raw) handleToken(raw, "QR");
             }
           }
         );
       } catch (e) {
-        // fallback to video device selection
         usedFallback = true;
         console.warn("[SCANNER] constraints failed -> fallback", e);
 
@@ -527,10 +564,17 @@ export default function Scanner() {
             if (!onScannerNow()) return;
             if (startSeqRef.current !== seqId) return;
 
+            // heartbeat: callback is alive
+            lastCbAtRef.current = Date.now();
+            cbCountRef.current += 1;
+
             if (result?.getText) {
+              const raw = String(result.getText() || "").trim();
+              lastRawRef.current = raw.slice(0, 120);
+              lastTokRef.current = extractToken(raw).slice(0, 80);
+
               lastDecodeAtRef.current = Date.now();
-              const text = String(result.getText() || "").trim();
-              if (text) handleToken(text, "QR");
+              if (raw) handleToken(raw, "QR");
             }
           }
         );
@@ -657,6 +701,16 @@ export default function Scanner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.key]);
 
+  const cbAge =
+    lastCbAtRef.current > 0
+      ? Math.max(0, Math.floor((Date.now() - lastCbAtRef.current) / 1000))
+      : null;
+
+  const decodeAge =
+    lastDecodeAtRef.current > 0
+      ? Math.max(0, Math.floor((Date.now() - lastDecodeAtRef.current) / 1000))
+      : null;
+
   // -------- UI --------
   return (
     <div className="min-h-[100dvh] bg-transparent">
@@ -694,10 +748,14 @@ export default function Scanner() {
           </div>
         ) : null}
 
-        {/* tiny debug line */}
+        {/* DEBUG (ref-based, refreshed by dbgTick) */}
         <div className="mb-3 text-[11px] text-slate-500 font-semibold">
-          DEBUG: CAM={cameraOn ? "ON" : "OFF"} BUSY={cameraBusy ? "1" : "0"} LAST_DECODE=
-          {lastDecodeAtRef.current ? `${Math.max(0, Math.floor((Date.now() - lastDecodeAtRef.current) / 1000))}s` : "NONE"}
+          DEBUG[{dbgTick}]: CAM={cameraOn ? "ON" : "OFF"} BUSY={cameraBusy ? "1" : "0"}{" "}
+          LAST_CB={cbAge === null ? "NONE" : `${cbAge}s`} CB_COUNT={cbCountRef.current}{" "}
+          LAST_DECODE={decodeAge === null ? "NONE" : `${decodeAge}s`}{" "}
+          LOOKUP={lastLookupRef.current}{" "}
+          TOK={lastTokRef.current || "—"}{" "}
+          RAW={lastRawRef.current || "—"}
         </div>
 
         <div className="rounded-3xl border border-slate-200 bg-white overflow-hidden">
