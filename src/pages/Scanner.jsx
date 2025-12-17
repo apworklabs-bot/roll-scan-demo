@@ -413,7 +413,10 @@ export default function Scanner() {
   async function handleToken(rawToken, scanMethod = "QR") {
     if (!isMountedRef.current) return;
     if (!onScannerNow()) return;
-    if (scanMethod === "QR" && !cameraOn) return;
+
+    // ✅ FIX: ΜΗΝ ΜΠΛΟΚΑΡΕΙΣ ΤΟ LOOKUP ΑΝ Η ΚΑΜΕΡΑ ΕΚΛΕΙΣΕ ΜΟΛΙΣ ΕΓΙΝΕ DECODE
+    // (ΑΥΤΟ ΣΟΥ ΕΔΙΝΕ LOOKUP=NONE ΕΝΩ ΕΙΧΕΣ TOK)
+    // if (scanMethod === "QR" && !cameraOn) return;
 
     const extracted = extractToken(rawToken);
     const t = String(extracted || "").trim();
@@ -504,7 +507,6 @@ export default function Scanner() {
       // Start watchdog AFTER we mark camera on
       startWatchdog(seqId);
 
-      // Try constraints first
       const constraints = {
         audio: false,
         video: {
@@ -525,7 +527,6 @@ export default function Scanner() {
             if (!onScannerNow()) return;
             if (startSeqRef.current !== seqId) return;
 
-            // heartbeat: callback is alive
             lastCbAtRef.current = Date.now();
             cbCountRef.current += 1;
 
@@ -564,7 +565,6 @@ export default function Scanner() {
             if (!onScannerNow()) return;
             if (startSeqRef.current !== seqId) return;
 
-            // heartbeat: callback is alive
             lastCbAtRef.current = Date.now();
             cbCountRef.current += 1;
 
