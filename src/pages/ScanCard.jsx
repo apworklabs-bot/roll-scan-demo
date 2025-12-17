@@ -26,10 +26,10 @@ function clsx(...a) {
 }
 
 // ============================
-// CONFIG (ΑΛΛΑΞΕ ΜΟΝΟ ΑΥΤΑ ΑΝ ΧΡΕΙΑΖΕΤΑΙ)
+// CONFIG
 // ============================
 const PAYMENTS_SUMMARY_VIEW = "bus_payments_summary"; // optional view
-const ATTENDANCE_TABLE = "attendance"; // optional table
+const ATTENDANCE_TABLE = "attendance_logs"; // ✅ YOUR REAL TABLE
 const EQUIPMENT_LOANS_TABLE = "equipment_loans"; // optional table
 
 // ============================
@@ -85,11 +85,12 @@ export default function ScanCard() {
   const [loans, setLoans] = useState([]);
   const [loansCount, setLoansCount] = useState(0);
 
+  // ✅ Attendance is derived from the latest row in attendance_logs
   const [attendance, setAttendance] = useState({
     present: null, // true/false/null
     notes: "",
-    segment_id: null,
-    updated_at: null,
+    segment_id: null, // kept for UI compatibility (not used with logs)
+    updated_at: null, // scanned_at from logs
   });
 
   // UI
@@ -102,6 +103,7 @@ export default function ScanCard() {
   const [receipt, setReceipt] = useState(false);
 
   const scanMethod = location.state?.scanMethod || "QR";
+
   const canLoad = !!tripId && !!participantId;
 
   const name = participant?.full_name || participant?.name || "—";
@@ -109,10 +111,7 @@ export default function ScanCard() {
   const email = participant?.email || "";
   const busCode = participant?.bus_code || participant?.bus || "";
   const seat =
-    participant?.seat ||
-    participant?.seat_no ||
-    participant?.seat_number ||
-    "";
+    participant?.seat || participant?.seat_no || participant?.seat_number || "";
 
   // auto-hide toast
   useEffect(() => {
@@ -120,6 +119,14 @@ export default function ScanCard() {
     const t = setTimeout(() => setToast(""), 1200);
     return () => clearTimeout(t);
   }, [toast]);
+
+  // ✅ Guard: if someone opens ScanCard without params, bounce out (prevents weird loops)
+  useEffect(() => {
+    if (!canLoad) {
+      navigate("/scanner", { replace: true, state: { resume: true } });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canLoad]);
 
   // BADGES
   const checkinBadge = useMemo(() => {
@@ -181,25 +188,28 @@ export default function ScanCard() {
       if (pErr) throw pErr;
       setParticipant(p || null);
 
-      // 3) Attendance (optional)
+      // 3) Attendance (from attendance_logs)
       try {
         const { data: a, error: aErr } = await supabase
           .from(ATTENDANCE_TABLE)
-          .select("present, notes, segment_id, updated_at")
+          .select("event_type, note, scanned_at")
           .eq("trip_id", tripId)
           .eq("participant_id", participantId)
-          .order("updated_at", { ascending: false })
+          .order("scanned_at", { ascending: false })
           .limit(1)
           .maybeSingle();
 
         if (aErr) throw aErr;
 
         if (a) {
+          const ev = String(a.event_type || "").toUpperCase();
+          const present = ev === "IN" ? true : ev ? false : null;
+
           setAttendance({
-            present: a.present ?? null,
-            notes: a.notes || "",
-            segment_id: a.segment_id || null,
-            updated_at: a.updated_at || null,
+            present,
+            notes: a.note || "",
+            segment_id: null,
+            updated_at: a.scanned_at || null,
           });
         } else {
           setAttendance({
@@ -300,24 +310,34 @@ export default function ScanCard() {
   // ============================
   // ACTIONS
   // ============================
-  async function saveAttendance({ autoClose = true } = {}) {
+  async function saveAttendance({ autoClose = true, presentOverride = null } = {}) {
     if (!canLoad) return;
     setBusy(true);
     setErr("");
 
     try {
+      const presentValue =
+        presentOverride !== null ? presentOverride : attendance.present;
+
+      if (presentValue === null) {
+        setErr("ΔΙΑΛΕΞΕ ΠΑΡΩΝ / ΑΠΩΝ");
+        return;
+      }
+
+      // ✅ logs: write a new row (no upsert)
+      const event_type = presentValue === true ? "IN" : "OUT";
+
       const payload = {
         trip_id: tripId,
         participant_id: participantId,
-        present: attendance.present === true,
-        notes: attendance.notes || "",
-        segment_id: attendance.segment_id || null,
+        scanned_at: new Date().toISOString(),
+        source: String(scanMethod || "scanner").toLowerCase(), // "qr" | "manual" | "paste"
+        note: attendance.notes || "",
+        event_type,
+        // scanned_by: leave null unless you have auth user id
       };
 
-      const { error } = await supabase
-        .from(ATTENDANCE_TABLE)
-        .upsert(payload, { onConflict: "trip_id,participant_id" });
-
+      const { error } = await supabase.from(ATTENDANCE_TABLE).insert(payload);
       if (error) throw error;
 
       setToast("OK");
@@ -339,11 +359,8 @@ export default function ScanCard() {
   }
 
   async function oneTapCheckinOk() {
-    setAttendance((a) => ({ ...a, present: true }));
-    // περιμένουμε tick για να “γράψει” στο state
-    setTimeout(() => {
-      saveAttendance({ autoClose: true });
-    }, 0);
+    // no state race: write directly as IN
+    await saveAttendance({ autoClose: true, presentOverride: true });
   }
 
   async function addPayment(amt) {
@@ -406,7 +423,6 @@ export default function ScanCard() {
   // UI
   // ============================
   const headerTripLabel = trip?.name ? safeUpper(trip.name) : safeUpper(tripId);
-
   const chips = [checkinBadge, busBadge, paymentBadge, equipBadge];
 
   return (
@@ -526,9 +542,7 @@ export default function ScanCard() {
                   className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-extrabold text-slate-900"
                   disabled={busy}
                 >
-                  <RefreshCw
-                    className={clsx("w-4 h-4", busy && "animate-spin")}
-                  />
+                  <RefreshCw className={clsx("w-4 h-4", busy && "animate-spin")} />
                   REFRESH
                 </button>
               </div>
@@ -655,9 +669,7 @@ export default function ScanCard() {
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
-                    onClick={() =>
-                      setAttendance((a) => ({ ...a, present: true }))
-                    }
+                    onClick={() => setAttendance((a) => ({ ...a, present: true }))}
                     className={clsx(
                       "rounded-2xl border px-3 py-3 text-left",
                       attendance.present === true
@@ -673,9 +685,7 @@ export default function ScanCard() {
 
                   <button
                     type="button"
-                    onClick={() =>
-                      setAttendance((a) => ({ ...a, present: false }))
-                    }
+                    onClick={() => setAttendance((a) => ({ ...a, present: false }))}
                     className={clsx(
                       "rounded-2xl border px-3 py-3 text-left",
                       attendance.present === false
@@ -791,9 +801,7 @@ export default function ScanCard() {
                       disabled={busy}
                       className={clsx(
                         "rounded-xl px-3 py-2 text-xs font-extrabold",
-                        busy
-                          ? "bg-slate-200 text-slate-500"
-                          : "bg-slate-900 text-white"
+                        busy ? "bg-slate-200 text-slate-500" : "bg-slate-900 text-white"
                       )}
                     >
                       OK
@@ -855,9 +863,7 @@ export default function ScanCard() {
                           </div>
                           <div className="mt-1 text-[11px] text-slate-500">
                             {x.created_at
-                              ? String(x.created_at)
-                                  .slice(0, 19)
-                                  .replace("T", " ")
+                              ? String(x.created_at).slice(0, 19).replace("T", " ")
                               : "—"}
                             {x.staff_name ? ` • ${safeUpper(x.staff_name)}` : ""}
                           </div>
