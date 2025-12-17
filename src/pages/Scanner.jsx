@@ -142,6 +142,18 @@ export default function Scanner() {
     [trips, tripId]
   );
 
+  // ---------------------------------------------------------
+  // ✅ CRITICAL ROUTE GUARD:
+  // if we are NOT on /scanner, cut camera immediately
+  // (prevents nav hijack back to /scan-card, android beep spam, etc.)
+  // ---------------------------------------------------------
+  useEffect(() => {
+    if (location.pathname !== "/scanner") {
+      stopCamera();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname]);
+
   useEffect(() => {
     const onOn = () => setOnline(true);
     const onOff = () => setOnline(false);
@@ -219,7 +231,6 @@ export default function Scanner() {
   }
 
   // ✅ OPEN SCAN CARD (FULL SCREEN)
-  // ✅ IMPORTANT: stop camera ONLY here (when we actually open a card)
   function goParticipant(tripIdToUse, participantId, scanMethod) {
     const t = String(tripIdToUse || "").trim();
     const p = String(participantId || "").trim();
@@ -233,10 +244,7 @@ export default function Scanner() {
       `/scan-card?tripId=${encodeURIComponent(t)}&participantId=${encodeURIComponent(
         p
       )}`,
-      {
-        state: { scanMethod },
-        replace: true,
-      }
+      { state: { scanMethod }, replace: true }
     );
   }
 
@@ -334,6 +342,9 @@ export default function Scanner() {
   }
 
   async function handleToken(rawToken, scanMethod = "QR") {
+    // ✅ extra safety: ignore if not on scanner screen
+    if (location.pathname !== "/scanner") return;
+
     const extracted = extractToken(rawToken);
     const t = String(extracted || "").trim();
     if (!t) return;
@@ -342,10 +353,8 @@ export default function Scanner() {
     lookupLockRef.current = true;
 
     const now = Date.now();
-    if (
-      lastTokenRef.current.token === t &&
-      now - lastTokenRef.current.ts < 1500
-    ) {
+    // ✅ Android: stronger anti-double-fire
+    if (lastTokenRef.current.token === t && now - lastTokenRef.current.ts < 4000) {
       lookupLockRef.current = false;
       return;
     }
@@ -384,6 +393,8 @@ export default function Scanner() {
   // ---------------------------------------------------------
   async function startCamera() {
     if (cameraOn || cameraBusy) return;
+    if (location.pathname !== "/scanner") return;
+
     setErr("");
     setInfo("");
     setCameraBusy(true);
@@ -406,7 +417,8 @@ export default function Scanner() {
           ) || null;
 
         if (byLabel?.deviceId) deviceId = byLabel.deviceId;
-        else if (devices.length > 0) deviceId = devices[devices.length - 1].deviceId;
+        else if (devices.length > 0)
+          deviceId = devices[devices.length - 1].deviceId;
       } catch {
         deviceId = undefined;
       }
@@ -417,6 +429,9 @@ export default function Scanner() {
         deviceId || undefined,
         videoRef.current,
         (result, error) => {
+          // ✅ ignore callbacks if we've left /scanner
+          if (location.pathname !== "/scanner") return;
+
           if (result?.getText) {
             const text = String(result.getText() || "").trim();
             if (text) handleToken(text, "QR");
@@ -522,10 +537,7 @@ export default function Scanner() {
     setManualOpen(true);
 
     setTimeout(() => {
-      manualWrapRef.current?.scrollIntoView?.({
-        behavior: "smooth",
-        block: "start",
-      });
+      manualWrapRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" });
       setTimeout(() => {
         manualInputRef.current?.focus?.();
       }, 180);
@@ -562,7 +574,6 @@ export default function Scanner() {
   return (
     <div className="min-h-[100dvh] bg-transparent">
       <div className="w-full max-w-none mx-auto px-3 pt-3 pb-28">
-        {/* STATUS ROW (LIKE MOCK) */}
         <div className="flex items-center justify-between gap-2 mb-3">
           <div className="text-[13px] font-extrabold tracking-wide text-slate-900">
             CAMERA QR → SCAN CARD
@@ -583,7 +594,6 @@ export default function Scanner() {
           </div>
         </div>
 
-        {/* ERR / INFO */}
         {err ? (
           <div className="mb-3 rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-[12px] font-extrabold text-rose-800 flex items-center gap-2">
             <AlertCircle className="w-4 h-4" />
@@ -597,7 +607,6 @@ export default function Scanner() {
           </div>
         ) : null}
 
-        {/* CAMERA CARD (LIKE MOCK) */}
         <div className="rounded-3xl border border-slate-200 bg-white overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
             <div className="text-[12px] font-extrabold tracking-wide text-slate-700">
@@ -662,7 +671,6 @@ export default function Scanner() {
           </div>
         </div>
 
-        {/* MANUAL PANEL (OPENS ONLY ON MANUAL BUTTON) */}
         {manualOpen ? (
           <div
             ref={manualWrapRef}
@@ -682,7 +690,6 @@ export default function Scanner() {
             </div>
 
             <div className="p-4">
-              {/* OPTIONAL TRIP FILTER */}
               <div className="mb-3">
                 <div className="text-[11px] font-extrabold tracking-wide text-slate-600 mb-1">
                   ΕΚΔΡΟΜΗ (OPTIONAL)
@@ -714,15 +721,12 @@ export default function Scanner() {
                     </span>
                     <span className="inline-flex items-center gap-1">
                       <Calendar className="w-3 h-3" />
-                      {selectedTrip.start_date
-                        ? String(selectedTrip.start_date).slice(0, 10)
-                        : ""}
+                      {selectedTrip.start_date ? String(selectedTrip.start_date).slice(0, 10) : ""}
                     </span>
                   </div>
                 ) : null}
               </div>
 
-              {/* SEARCH */}
               <div className="text-[11px] font-extrabold tracking-wide text-slate-600 mb-2">
                 MANUAL SEARCH (ΟΝΟΜΑ / ΤΗΛΕΦΩΝΟ / EMAIL / BUS)
               </div>
@@ -757,7 +761,6 @@ export default function Scanner() {
                 </button>
               </div>
 
-              {/* RESULTS */}
               <div className="mt-4 space-y-2">
                 {results.length > 0 ? (
                   <div className="text-[11px] text-slate-500 inline-flex items-center gap-2">
@@ -781,13 +784,9 @@ export default function Scanner() {
                         <div className="mt-1 text-[11px] text-slate-600 flex flex-wrap gap-3">
                           {p.phone ? <span>ΤΗΛ: {p.phone}</span> : null}
                           {p.email ? <span>EMAIL: {p.email}</span> : null}
-                          {p.bus_code ? (
-                            <span>BUS: {String(p.bus_code).toUpperCase()}</span>
-                          ) : null}
+                          {p.bus_code ? <span>BUS: {String(p.bus_code).toUpperCase()}</span> : null}
                           {p.boarding_point ? (
-                            <span>
-                              ΑΦΕΤΗΡΙΑ: {String(p.boarding_point).toUpperCase()}
-                            </span>
+                            <span>ΑΦΕΤΗΡΙΑ: {String(p.boarding_point).toUpperCase()}</span>
                           ) : null}
                         </div>
                       </div>
@@ -800,13 +799,10 @@ export default function Scanner() {
                 ))}
 
                 {results.length === 0 ? (
-                  <div className="text-[11px] text-slate-500">
-                    ΓΡΑΨΕ ΚΑΤΙ ΚΑΙ ΚΑΝΕ ΑΝΑΖΗΤΗΣΗ.
-                  </div>
+                  <div className="text-[11px] text-slate-500">ΓΡΑΨΕ ΚΑΤΙ ΚΑΙ ΚΑΝΕ ΑΝΑΖΗΤΗΣΗ.</div>
                 ) : null}
               </div>
 
-              {/* OPTIONAL: PASTE TOKEN LOOKUP (inside manual) */}
               <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-3">
                 <div className="text-[11px] font-extrabold tracking-wide text-slate-700 mb-2">
                   QR LOOKUP (PASTE)
@@ -839,10 +835,8 @@ export default function Scanner() {
         ) : null}
       </div>
 
-      {/* BOTTOM CONTROLS (LIKE MOCK) */}
       <div className="fixed bottom-0 left-0 right-0 z-50 bg-white border-t border-slate-200">
         <div className="px-3 py-3 grid grid-cols-3 gap-2">
-          {/* PAUSE / RESUME */}
           <button
             type="button"
             onClick={() => (cameraOn ? stopCamera() : startCamera())}
@@ -857,7 +851,6 @@ export default function Scanner() {
             {cameraOn ? "PAUSE" : "RESUME"}
           </button>
 
-          {/* FLASH */}
           <button
             type="button"
             disabled={!cameraOn}
@@ -867,15 +860,10 @@ export default function Scanner() {
               !cameraOn && "opacity-50 cursor-not-allowed"
             )}
           >
-            {torchOn ? (
-              <FlashlightOff className="w-4 h-4" />
-            ) : (
-              <Flashlight className="w-4 h-4" />
-            )}
+            {torchOn ? <FlashlightOff className="w-4 h-4" /> : <Flashlight className="w-4 h-4" />}
             FLASH
           </button>
 
-          {/* MANUAL */}
           <button
             type="button"
             onClick={openManual}
