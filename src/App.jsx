@@ -21,6 +21,9 @@ import NotificationSettings from "./pages/NotificationSettings.jsx";
 import Participants from "./pages/Participants.jsx";
 import Profile from "./pages/Profile.jsx";
 
+// ✅ NEW: DIGITAL PASS PAGE
+import Pass from "./pages/Pass.jsx";
+
 // ✅ Notifications Center
 import NotificationsCenter from "./pages/NotificationsCenter.jsx";
 
@@ -116,6 +119,9 @@ export default function App() {
                   {/* FRONT READ-ONLY */}
                   <Route path="equipmentview" element={<FrontEquipmentView />} />
                   <Route path="participantsview" element={<ParticipantsFront />} />
+
+                  {/* ✅ DIGITAL PASS */}
+                  <Route path="pass/:token" element={<Pass />} />
 
                   {/* SCANNER */}
                   <Route path="scanner" element={<Scanner />} />
