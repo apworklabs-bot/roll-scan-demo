@@ -70,6 +70,19 @@ function parseAmount(v) {
   return Number.isFinite(n) ? n : NaN;
 }
 
+// ✅ QUICK ACTION BUTTON STYLES (ACTIVE HIGHLIGHT)
+function quickBtnClass(isActive) {
+  return clsx(
+    "rounded-2xl border px-3 py-3 text-left transition-all",
+    isActive
+      ? "border-slate-900 bg-slate-900 text-white shadow-sm"
+      : "border-slate-200 bg-white text-slate-900 hover:bg-slate-50"
+  );
+}
+function quickSubClass(isActive) {
+  return isActive ? "text-white/80" : "text-slate-500";
+}
+
 export default function ScanCard() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -92,7 +105,9 @@ export default function ScanCard() {
     balance: 0,
     method: null,
   });
-  const [paymentsHistory, setPaymentsHistory] = useState([]); // optional
+
+  // ✅ Payments history (ADMIN STYLE)
+  const [paymentsHistory, setPaymentsHistory] = useState([]);
 
   // ✅ Equipment allocations (from view)
   const [loans, setLoans] = useState([]);
@@ -113,10 +128,20 @@ export default function ScanCard() {
   // money draft
   const [payAmount, setPayAmount] = useState("");
   const [payMethod, setPayMethod] = useState("CASH"); // CASH | CARD | TRANSFER
-  const [receipt, setReceipt] = useState(false); // UI only (no DB column)
+  const [receipt, setReceipt] = useState(false); // UI only
+
+  // ✅ INFO EDIT
+  const [infoEdit, setInfoEdit] = useState(false);
+  const [infoDraft, setInfoDraft] = useState({
+    full_name: "",
+    phone: "",
+    email: "",
+    bus_code: "",
+    seat: "",
+    notes: "",
+  });
 
   const scanMethod = location.state?.scanMethod || "QR";
-
   const canLoad = !!tripId && !!participantId;
 
   const name = participant?.full_name || participant?.name || "—";
@@ -124,7 +149,10 @@ export default function ScanCard() {
   const email = participant?.email || "";
   const busCode = participant?.bus_code || participant?.bus || "";
   const seat =
-    participant?.seat || participant?.seat_no || participant?.seat_number || "";
+    participant?.seat_no ||
+    participant?.seat_number ||
+    participant?.seat ||
+    "";
 
   // auto-hide toast
   useEffect(() => {
@@ -201,6 +229,19 @@ export default function ScanCard() {
       if (pErr) throw pErr;
       setParticipant(p || null);
 
+      // sync infoDraft when we load participant (only if not editing)
+      if (p && !infoEdit) {
+        const seatValue = p.seat_no ?? p.seat_number ?? "";
+        setInfoDraft({
+          full_name: p.full_name ?? p.name ?? "",
+          phone: p.phone ?? "",
+          email: p.email ?? "",
+          bus_code: p.bus_code ?? p.bus ?? "",
+          seat: seatValue ? String(seatValue) : "",
+          notes: p.notes ?? "",
+        });
+      }
+
       // 3) Attendance (from attendance_logs)
       try {
         const { data: a, error: aErr } = await supabase
@@ -266,19 +307,22 @@ export default function ScanCard() {
         setPaymentSummary({ total: 0, paid: 0, balance: 0, method: null });
       }
 
-      // 5) Payments history (optional table "payments")
+      // 5) Payments history (ADMIN STYLE: only BUS/PAYMENT)
       try {
         const { data: ph, error: phErr } = await supabase
           .from("payments")
-          .select("id, created_at, amount, method, staff_name")
+          .select("id, created_at, amount, method, status, description, scope, kind")
           .eq("trip_id", tripId)
           .eq("participant_id", participantId)
+          .eq("scope", "BUS")
+          .eq("kind", "PAYMENT")
           .order("created_at", { ascending: false })
           .limit(5);
 
         if (phErr) throw phErr;
         setPaymentsHistory(Array.isArray(ph) ? ph : []);
-      } catch {
+      } catch (e) {
+        console.error("[ScanCard] payments history error:", e);
         setPaymentsHistory([]);
       }
 
@@ -373,7 +417,7 @@ export default function ScanCard() {
     await saveAttendance({ autoClose: true, presentOverride: true });
   }
 
-  // ✅ FIXED PAYMENT
+  // ✅ PAYMENT
   async function addPayment(amt) {
     if (!canLoad) return;
 
@@ -413,7 +457,7 @@ export default function ScanCard() {
     }
   }
 
-  // ✅ NEW: Return via RPC (not updating view)
+  // ✅ Return via RPC (not updating view)
   async function markLoanReturned(allocationId) {
     if (!allocationId) return;
     setBusy(true);
@@ -431,6 +475,57 @@ export default function ScanCard() {
     } catch (e) {
       console.error(e);
       setErr(e?.message || "ΣΦΑΛΜΑ ΕΠΙΣΤΡΟΦΗΣ");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // ✅ SAVE PARTICIPANT INFO (EDIT)
+  async function saveParticipantInfo() {
+    if (!participantId) return;
+
+    setBusy(true);
+    setErr("");
+
+    try {
+      const p = participant || {};
+
+      // decide which seat column exists (WE NEVER SEND "seat")
+      const hasSeatNo = Object.prototype.hasOwnProperty.call(p, "seat_no");
+      const hasSeatNumber = Object.prototype.hasOwnProperty.call(p, "seat_number");
+
+      const patch = {
+        full_name: infoDraft.full_name || null,
+        phone: infoDraft.phone || null,
+        email: infoDraft.email || null,
+        bus_code: infoDraft.bus_code || null,
+        notes: infoDraft.notes || null,
+      };
+
+      const seatValue = String(infoDraft.seat ?? "").trim();
+      if (seatValue) {
+        if (hasSeatNo) patch.seat_no = seatValue;
+        else if (hasSeatNumber) patch.seat_number = seatValue;
+        // else: ignore completely (prevents PGRST204)
+      } else {
+        // if user cleared seat, also clear the real column (only if it exists)
+        if (hasSeatNo) patch.seat_no = null;
+        else if (hasSeatNumber) patch.seat_number = null;
+      }
+
+      const { error } = await supabase
+        .from("participants")
+        .update(patch)
+        .eq("id", participantId);
+
+      if (error) throw error;
+
+      setToast("OK");
+      setInfoEdit(false);
+      await loadAll();
+    } catch (e) {
+      console.error(e);
+      setErr(e?.message || "ΣΦΑΛΜΑ ΑΠΟΘΗΚΕΥΣΗΣ");
     } finally {
       setBusy(false);
     }
@@ -605,37 +700,47 @@ export default function ScanCard() {
               <button
                 type="button"
                 onClick={() => setActivePanel("confirm")}
-                className="rounded-2xl border border-slate-200 bg-slate-900 text-white px-3 py-3 text-left"
+                className={quickBtnClass(activePanel === "confirm")}
               >
                 <div className="flex items-center gap-2 text-xs font-extrabold">
                   <ClipboardCheck className="w-4 h-4" />
                   ΕΠΙΒΕΒΑΙΩΣΗ
                 </div>
-                <div className="mt-1 text-[11px] text-white/80">DETAILS</div>
+                <div
+                  className={clsx("mt-1 text-[11px]", quickSubClass(activePanel === "confirm"))}
+                >
+                  DETAILS
+                </div>
               </button>
 
               <button
                 type="button"
                 onClick={() => setActivePanel("money")}
-                className="rounded-2xl border border-slate-200 bg-white text-slate-900 px-3 py-3 text-left"
+                className={quickBtnClass(activePanel === "money")}
               >
                 <div className="flex items-center gap-2 text-xs font-extrabold">
                   <Euro className="w-4 h-4" />
                   ΟΙΚΟΝΟΜΙΚΑ
                 </div>
-                <div className="mt-1 text-[11px] text-slate-500">ΤΑΜΕΙΟ</div>
+                <div
+                  className={clsx("mt-1 text-[11px]", quickSubClass(activePanel === "money"))}
+                >
+                  ΤΑΜΕΙΟ
+                </div>
               </button>
 
               <button
                 type="button"
                 onClick={() => setActivePanel("equip")}
-                className="rounded-2xl border border-slate-200 bg-white text-slate-900 px-3 py-3 text-left"
+                className={quickBtnClass(activePanel === "equip")}
               >
                 <div className="flex items-center gap-2 text-xs font-extrabold">
                   <Package className="w-4 h-4" />
                   ΕΞΟΠΛΙΣΜΟΣ
                 </div>
-                <div className="mt-1 text-[11px] text-slate-500">
+                <div
+                  className={clsx("mt-1 text-[11px]", quickSubClass(activePanel === "equip"))}
+                >
                   ΔΑΝΕΙΚΑ / ΕΠΙΣΤΡΟΦΕΣ
                 </div>
               </button>
@@ -643,13 +748,17 @@ export default function ScanCard() {
               <button
                 type="button"
                 onClick={() => setActivePanel("info")}
-                className="rounded-2xl border border-slate-200 bg-white text-slate-900 px-3 py-3 text-left"
+                className={quickBtnClass(activePanel === "info")}
               >
                 <div className="flex items-center gap-2 text-xs font-extrabold">
                   <User className="w-4 h-4" />
                   ΣΤΟΙΧΕΙΑ
                 </div>
-                <div className="mt-1 text-[11px] text-slate-500">READ</div>
+                <div
+                  className={clsx("mt-1 text-[11px]", quickSubClass(activePanel === "info"))}
+                >
+                  EDIT / READ
+                </div>
               </button>
             </div>
           </div>
@@ -693,9 +802,7 @@ export default function ScanCard() {
                         : "border-slate-200 bg-white"
                     )}
                   >
-                    <div className="text-xs font-extrabold text-slate-900">
-                      ΠΑΡΩΝ
-                    </div>
+                    <div className="text-xs font-extrabold text-slate-900">ΠΑΡΩΝ</div>
                     <div className="text-[11px] text-slate-500">CHECKIN OK</div>
                   </button>
 
@@ -709,9 +816,7 @@ export default function ScanCard() {
                         : "border-slate-200 bg-white"
                     )}
                   >
-                    <div className="text-xs font-extrabold text-slate-900">
-                      ΑΠΩΝ
-                    </div>
+                    <div className="text-xs font-extrabold text-slate-900">ΑΠΩΝ</div>
                     <div className="text-[11px] text-slate-500">PENDING</div>
                   </button>
                 </div>
@@ -842,7 +947,6 @@ export default function ScanCard() {
                     ))}
                   </div>
 
-                  {/* UI only */}
                   <label className="mt-2 inline-flex items-center gap-2 text-xs font-extrabold text-slate-700">
                     <input
                       type="checkbox"
@@ -870,19 +974,23 @@ export default function ScanCard() {
                           key={x.id}
                           className="rounded-2xl border border-slate-200 bg-white px-3 py-2"
                         >
-                          <div className="flex items-center justify-between">
-                            <div className="text-xs font-extrabold text-slate-900">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <div className="text-[12px] font-extrabold text-slate-900 truncate">
+                                {safeUpper(x.description || "PAYMENT")}
+                              </div>
+                              <div className="mt-1 text-[11px] text-slate-500">
+                                {x.created_at
+                                  ? new Date(x.created_at).toLocaleString("el-GR")
+                                  : "—"}{" "}
+                                • {safeUpper(x.method || "—")} •{" "}
+                                {safeUpper(x.status || "—")}
+                              </div>
+                            </div>
+
+                            <div className="shrink-0 text-xs font-extrabold text-slate-900">
                               {fmtMoney(Number(x.amount || 0))}
                             </div>
-                            <div className="text-[11px] text-slate-500">
-                              {safeUpper(x.method || "")}
-                            </div>
-                          </div>
-                          <div className="mt-1 text-[11px] text-slate-500">
-                            {x.created_at
-                              ? String(x.created_at).slice(0, 19).replace("T", " ")
-                              : "—"}
-                            {x.staff_name ? ` • ${safeUpper(x.staff_name)}` : ""}
                           </div>
                         </div>
                       ))}
@@ -957,23 +1065,114 @@ export default function ScanCard() {
             {/* INFO */}
             {activePanel === "info" ? (
               <div className="mt-3">
-                <div className="grid grid-cols-1 gap-2">
-                  <InfoRow label="ΟΝΟΜΑ" value={safeUpper(name)} icon={<User className="w-4 h-4" />} />
-                  <InfoRow label="ΤΗΛ" value={phone || "—"} icon={<Phone className="w-4 h-4" />} />
-                  <InfoRow label="EMAIL" value={email || "—"} icon={<Mail className="w-4 h-4" />} />
-                  <InfoRow label="BUS" value={busCode ? safeUpper(busCode) : "—"} icon={<Bus className="w-4 h-4" />} />
-                  <InfoRow label="SEAT" value={seat ? safeUpper(seat) : "—"} icon={<Bus className="w-4 h-4" />} />
-                  <InfoRow
-                    label="NOTES"
-                    value={participant?.notes ? String(participant.notes) : "—"}
-                    icon={<FileText className="w-4 h-4" />}
-                    multiline
-                  />
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <div className="text-[11px] font-extrabold tracking-wide text-slate-600">
+                    ΣΤΟΙΧΕΙΑ ΣΥΜΜΕΤΕΧΟΝΤΑ
+                  </div>
+
+                  {!infoEdit ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        // enter edit
+                        setInfoDraft({
+                          full_name: participant?.full_name ?? participant?.name ?? "",
+                          phone: participant?.phone ?? "",
+                          email: participant?.email ?? "",
+                          bus_code: participant?.bus_code ?? participant?.bus ?? "",
+                          seat:
+                            (participant?.seat_no ?? participant?.seat_number ?? "") + "",
+                          notes: participant?.notes ?? "",
+                        });
+                        setInfoEdit(true);
+                      }}
+                      className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-extrabold"
+                    >
+                      EDIT
+                    </button>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setInfoEdit(false);
+                          setErr("");
+                        }}
+                        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-extrabold"
+                        disabled={busy}
+                      >
+                        CANCEL
+                      </button>
+                      <button
+                        type="button"
+                        onClick={saveParticipantInfo}
+                        className={clsx(
+                          "rounded-xl px-3 py-2 text-xs font-extrabold",
+                          busy ? "bg-slate-200 text-slate-500" : "bg-slate-900 text-white"
+                        )}
+                        disabled={busy}
+                      >
+                        SAVE
+                      </button>
+                    </div>
+                  )}
                 </div>
 
-                <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-[11px] text-slate-600">
-                  EDIT ΚΟΥΜΠΙ ΜΠΑΙΝΕΙ ΑΝ ΤΟ ΘΕΣ (READ MOSTLY).
-                </div>
+                {!infoEdit ? (
+                  <div className="grid grid-cols-1 gap-2">
+                    <InfoRow label="ΟΝΟΜΑ" value={safeUpper(name)} icon={<User className="w-4 h-4" />} />
+                    <InfoRow label="ΤΗΛ" value={phone || "—"} icon={<Phone className="w-4 h-4" />} />
+                    <InfoRow label="EMAIL" value={email || "—"} icon={<Mail className="w-4 h-4" />} />
+                    <InfoRow label="BUS" value={busCode ? safeUpper(busCode) : "—"} icon={<Bus className="w-4 h-4" />} />
+                    <InfoRow label="SEAT" value={seat ? safeUpper(seat) : "—"} icon={<Bus className="w-4 h-4" />} />
+                    <InfoRow
+                      label="NOTES"
+                      value={participant?.notes ? String(participant.notes) : "—"}
+                      icon={<FileText className="w-4 h-4" />}
+                      multiline
+                    />
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 gap-2">
+                    <EditRow
+                      label="ΟΝΟΜΑ"
+                      value={infoDraft.full_name}
+                      onChange={(v) => setInfoDraft((d) => ({ ...d, full_name: v }))}
+                    />
+                    <EditRow
+                      label="ΤΗΛ"
+                      value={infoDraft.phone}
+                      onChange={(v) => setInfoDraft((d) => ({ ...d, phone: v }))}
+                      inputMode="tel"
+                    />
+                    <EditRow
+                      label="EMAIL"
+                      value={infoDraft.email}
+                      onChange={(v) => setInfoDraft((d) => ({ ...d, email: v }))}
+                      inputMode="email"
+                    />
+                    <EditRow
+                      label="BUS"
+                      value={infoDraft.bus_code}
+                      onChange={(v) => setInfoDraft((d) => ({ ...d, bus_code: v }))}
+                    />
+                    <EditRow
+                      label="SEAT"
+                      value={infoDraft.seat}
+                      onChange={(v) => setInfoDraft((d) => ({ ...d, seat: v }))}
+                    />
+                    <EditArea
+                      label="NOTES"
+                      value={infoDraft.notes}
+                      onChange={(v) => setInfoDraft((d) => ({ ...d, notes: v }))}
+                    />
+
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-[11px] text-slate-600">
+                      ΣΗΜΑΝΤΙΚΟ: ΔΕΝ ΥΠΑΡΧΕΙ COLUMN "seat". ΑΠΟΘΗΚΕΥΟΥΜΕ ΣΕ seat_no
+                      Η seat_number ΑΝ ΥΠΑΡΧΕΙ. ΑΛΛΙΩΣ ΤΟ ΑΓΝΟΟΥΜΕ.
+                    </div>
+                  </div>
+                )}
               </div>
             ) : null}
           </div>
@@ -1015,6 +1214,37 @@ function InfoRow({ label, value, icon, multiline = false }) {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function EditRow({ label, value, onChange, inputMode }) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white px-3 py-2">
+      <div className="text-[10px] font-extrabold tracking-wide text-slate-500 mb-1">
+        {label}
+      </div>
+      <input
+        value={value ?? ""}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+        inputMode={inputMode}
+      />
+    </div>
+  );
+}
+
+function EditArea({ label, value, onChange }) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white px-3 py-2">
+      <div className="text-[10px] font-extrabold tracking-wide text-slate-500 mb-1">
+        {label}
+      </div>
+      <textarea
+        value={value ?? ""}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm min-h-[90px]"
+      />
     </div>
   );
 }

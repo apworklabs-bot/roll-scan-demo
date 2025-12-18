@@ -1,4 +1,4 @@
-// src/Pages/FrontEquipmentView.jsx
+// src/pages/FrontEquipmentView.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -101,13 +101,12 @@ export default function FrontEquipmentView() {
             <div className="w-11 h-11 rounded-2xl bg-white/90 border border-orange-100 flex items-center justify-center">
               <Package className="w-5 h-5 text-slate-900" />
             </div>
-            <div>
+            <div className="min-w-0">
               <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight">
                 Εξοπλισμός
               </h1>
               <p className="mt-1 text-sm text-slate-600">
-                Read-only εικόνα για εξοπλισμό που χρησιμοποιείται σε ενεργές
-                εκδρομές.
+                Read-only εικόνα για εξοπλισμό σε ενεργές εκδρομές.
               </p>
             </div>
           </div>
@@ -203,51 +202,60 @@ export default function FrontEquipmentView() {
                   Δεν βρέθηκαν είδη.
                 </p>
                 <p className="text-xs text-slate-600 mt-1">
-                  Δοκίμασε να αλλάξεις φίλτρο ή αναζήτηση.
+                  Δοκίμασε φίλτρο ή αναζήτηση.
                 </p>
               </div>
             </div>
           ) : (
             <ul className="divide-y divide-slate-100">
-              {filtered.map((r, idx) => (
-                <li key={`${r.item_code}-${idx}`} className="px-4 md:px-6 py-3">
-                  {/* ✅ MOBILE: 2 ROWS / DESKTOP: 1 ROW */}
-                  <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between md:gap-3">
-                    {/* LEFT */}
-                    <div className="min-w-0">
-                      {/* Row 1: CODE + NAME (always readable on mobile) */}
-                      <div className="flex items-baseline gap-3 min-w-0">
-                        <span className="text-xs font-semibold text-slate-500 shrink-0">
-                          {r.item_code || "—"}
-                        </span>
-                        <span className="text-sm font-extrabold text-slate-900 truncate min-w-0">
-                          {r.item_name || "—"}
-                        </span>
-                      </div>
+              {filtered.map((r, idx) => {
+                const code = r.item_code || "—";
+                const name = r.item_name || "—";
+                const cat = r.category || "—";
+                const used = Number(r.used_qty ?? 0);
+                const available = Number(r.available_now ?? 0);
 
-                      {/* Row 2: META */}
-                      <div className="text-xs text-slate-600">
-                        {r.category || "—"} • ΧΡΗΣΗ:{" "}
-                        <span className="font-semibold text-slate-900">
-                          {r.used_qty ?? 0}
-                        </span>
-                      </div>
-                    </div>
+                return (
+                  <li key={`${code}-${idx}`} className="px-4 md:px-6 py-3">
+                    {/* MOBILE-FIRST CARD */}
+                    <div className="rounded-2xl border border-slate-100 bg-white px-3 py-3">
+                      {/* TOP: code + name + right column */}
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="text-xs font-semibold text-slate-500">
+                            {code}
+                          </div>
 
-                    {/* RIGHT (mobile goes to 2nd line naturally) */}
-                    <div className="flex items-center justify-between md:justify-end gap-3 md:min-w-[220px] shrink-0">
-                      <div className="flex items-baseline gap-2">
-                        <div className="text-xs text-slate-500">ΔΙΑΘΕΣΙΜΟ</div>
-                        <div className="text-sm font-extrabold text-slate-900">
-                          {r.available_now ?? 0}
+                          {/* IMPORTANT: keep this readable on mobile */}
+                          <div className="mt-1 text-sm font-extrabold text-slate-900 break-words">
+                            {name}
+                          </div>
+
+                          <div className="mt-1 text-xs text-slate-600">
+                            {cat} • ΧΡΗΣΗ:{" "}
+                            <span className="font-semibold text-slate-900">
+                              {used}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="shrink-0 flex flex-col items-end gap-2">
+                          <div className="text-right">
+                            <div className="text-[10px] font-semibold tracking-wide text-slate-500">
+                              ΔΙΑΘΕΣΙΜΟ
+                            </div>
+                            <div className="text-xl font-extrabold text-slate-900 leading-none">
+                              {available}
+                            </div>
+                          </div>
+
+                          <StatusPill status={r.status} />
                         </div>
                       </div>
-
-                      <StatusPill status={r.status} />
                     </div>
-                  </div>
-                </li>
-              ))}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </section>
@@ -285,7 +293,6 @@ function SummaryCard({ label, value, tone, onClick, active }) {
       bg: "bg-white/80",
     },
   };
-
   const t = T[tone] || T.neutral;
 
   return (
@@ -328,7 +335,7 @@ function StatusPill({ status }) {
     },
   };
 
-  const cfg = S[status] || S.OK;
+  const cfg = S[String(status || "OK").toUpperCase()] || S.OK;
   const Icon = cfg.icon;
 
   return (
