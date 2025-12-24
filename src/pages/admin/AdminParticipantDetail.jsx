@@ -1,4 +1,4 @@
-// src/Pages/admin/AdminParticipantDetail.jsx
+// src/pages/admin/AdminParticipantDetail.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
@@ -47,8 +47,7 @@ export default function AdminParticipantDetail() {
   // Modal
   const [modalOpen, setModalOpen] = useState(false);
 
-  const effectiveId =
-    participantFromState?.id || participantIdFromParams || null;
+  const effectiveId = participantFromState?.id || participantIdFromParams || null;
 
   const formatCurrency = (value) =>
     new Intl.NumberFormat("el-GR", {
@@ -109,8 +108,7 @@ export default function AdminParticipantDetail() {
           merged.status ||
           "";
 
-        merged.boardingPoint =
-          merged.boardingPoint || merged.boarding_point || "";
+        merged.boardingPoint = merged.boardingPoint || merged.boarding_point || "";
 
         merged.arrivalMode =
           merged.arrivalMode || merged.arrival_mode || merged.arrival || "";
@@ -235,9 +233,7 @@ export default function AdminParticipantDetail() {
           paid,
           balance,
           paymentsCount: arr.length,
-          lastPaymentAt: lastPaymentAtMs
-            ? new Date(lastPaymentAtMs).toISOString()
-            : null,
+          lastPaymentAt: lastPaymentAtMs ? new Date(lastPaymentAtMs).toISOString() : null,
           source: "PAYMENTS_SUM",
         });
       } catch (e) {
@@ -307,11 +303,9 @@ export default function AdminParticipantDetail() {
     "ΧΩΡΙΣ ΟΝΟΜΑ";
 
   const tripTitle = trip?.name || participant?.trip_name || "ΧΩΡΙΣ ΕΚΔΡΟΜΗ";
-  const tripDate =
-    trip?.dateLabel || trip?.date || participant?.trip_date || "—";
+  const tripDate = trip?.dateLabel || trip?.date || participant?.trip_date || "—";
 
-  const tripLocation =
-    participant?.boardingPoint || participant?.boarding_point || "—";
+  const tripLocation = participant?.boardingPoint || participant?.boarding_point || "—";
 
   const transportLabel = participant?.bus
     ? `ΛΕΩΦΟΡΕΙΟ: ${participant.bus}`
@@ -324,10 +318,7 @@ export default function AdminParticipantDetail() {
   const statusRaw = String(participant?.status || "").toLowerCase();
 
   const statusMap = {
-    confirmed: {
-      label: "ΕΠΙΒΕΒΑΙΩΜΕΝΟΣ",
-      cls: "bg-emerald-50 text-emerald-700",
-    },
+    confirmed: { label: "ΕΠΙΒΕΒΑΙΩΜΕΝΟΣ", cls: "bg-emerald-50 text-emerald-700" },
     pending: { label: "ΕΚΚΡΕΜΟΤΗΤΑ", cls: "bg-amber-50 text-amber-700" },
     cancelled: { label: "ΑΚΥΡΩΜΕΝΟΣ", cls: "bg-rose-50 text-rose-700" },
   };
@@ -343,8 +334,7 @@ export default function AdminParticipantDetail() {
   const paid = Number(paySummary.paid || 0);
   const balance = Math.max(Number(paySummary.balance || 0), 0);
 
-  const paymentStatusKey =
-    balance <= 0 ? "paid" : paid > 0 ? "partial" : "due";
+  const paymentStatusKey = balance <= 0 ? "paid" : paid > 0 ? "partial" : "due";
 
   const initials =
     String(displayName || "??")
@@ -365,12 +355,9 @@ export default function AdminParticipantDetail() {
 
   const allocPill = (st) => {
     const s = String(st || "").toUpperCase();
-    if (s === "ASSIGNED")
-      return { label: "ASSIGNED", cls: "bg-sky-50 text-sky-700" };
-    if (s === "RETURNED")
-      return { label: "RETURNED", cls: "bg-emerald-50 text-emerald-700" };
-    if (s === "DAMAGED")
-      return { label: "DAMAGED", cls: "bg-amber-50 text-amber-700" };
+    if (s === "ASSIGNED") return { label: "ASSIGNED", cls: "bg-sky-50 text-sky-700" };
+    if (s === "RETURNED") return { label: "RETURNED", cls: "bg-emerald-50 text-emerald-700" };
+    if (s === "DAMAGED") return { label: "DAMAGED", cls: "bg-amber-50 text-amber-700" };
     if (s === "LOST") return { label: "LOST", cls: "bg-rose-50 text-rose-700" };
     return { label: s || "—", cls: "bg-slate-100 text-slate-600" };
   };
@@ -383,10 +370,23 @@ export default function AdminParticipantDetail() {
     participantFromState?.tripId ||
     null;
 
-  // ✅ OPEN BUS PAYMENTS (FRONT) WITH CONTEXT
+  // ✅ OPEN BUS PAYMENTS (ADMIN) — FIX: GO TO /admin/bus-payments (NOT /bus-payments)
   const openBusPayments = () => {
     if (!tripIdForInsert || !effectiveId) return;
-    navigate(`/bus-payments/${tripIdForInsert}/${effectiveId}`);
+
+    // optional: pass context so AdminBusPayments can auto-select (if you handle it there)
+    const qs = new URLSearchParams({
+      trip: String(tripIdForInsert),
+      participant: String(effectiveId),
+    }).toString();
+
+    navigate(`/admin/bus-payments?${qs}`, {
+      state: {
+        from: location.pathname,
+        participantId: effectiveId,
+        tripId: tripIdForInsert,
+      },
+    });
   };
 
   // ---------------------------------------------------------------------------
@@ -485,8 +485,7 @@ export default function AdminParticipantDetail() {
 
             <span
               className={`px-3 py-1 rounded-full text-[10px] font-extrabold ${
-                paymentMap[paymentStatusKey]?.cls ||
-                "bg-slate-100 text-slate-600"
+                paymentMap[paymentStatusKey]?.cls || "bg-slate-100 text-slate-600"
               }`}
               title="ΚΑΤΑΣΤΑΣΗ ΠΛΗΡΩΜΗΣ"
             >
@@ -529,7 +528,7 @@ export default function AdminParticipantDetail() {
           </div>
         </div>
 
-        {/* ✅ FINANCIALS (NO REST / NO SCHEMA CACHE DRAMA) */}
+        {/* ✅ FINANCIALS */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4">
           <div className="text-[11px] font-extrabold text-slate-700 mb-3">
             ΟΙΚΟΝΟΜΙΚΑ ΣΤΟΙΧΕΙΑ
@@ -540,8 +539,7 @@ export default function AdminParticipantDetail() {
               <div className="text-[10px] text-slate-500">ΚΑΤΑΣΤΑΣΗ ΠΛΗΡΩΜΗΣ</div>
               <span
                 className={`inline-flex items-center px-3 py-1 rounded-full text-[10px] font-extrabold mt-1 ${
-                  paymentMap[paymentStatusKey]?.cls ||
-                  "bg-slate-100 text-slate-600"
+                  paymentMap[paymentStatusKey]?.cls || "bg-slate-100 text-slate-600"
                 }`}
               >
                 {paymentMap[paymentStatusKey]?.label || "—"}
@@ -564,9 +562,7 @@ export default function AdminParticipantDetail() {
               </div>
               <div className="text-[10px] text-slate-400">
                 {paySummary.paymentsCount} ΚΙΝΗΣΕΙΣ
-                {paySummary.lastPaymentAt
-                  ? ` · ${formatDateTime(paySummary.lastPaymentAt)}`
-                  : ""}
+                {paySummary.lastPaymentAt ? ` · ${formatDateTime(paySummary.lastPaymentAt)}` : ""}
               </div>
             </div>
 
@@ -591,7 +587,7 @@ export default function AdminParticipantDetail() {
                 type="button"
                 onClick={openBusPayments}
                 className="inline-flex items-center gap-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 text-[11px] font-extrabold"
-                title="ΑΝΟΙΓΜΑ BUS PAYMENTS (FRONT)"
+                title="ΑΝΟΙΓΜΑ BUS PAYMENTS"
               >
                 <Bus className="w-4 h-4" />
                 BUS PAYMENTS
@@ -616,9 +612,9 @@ export default function AdminParticipantDetail() {
               </div>
 
               <div className="mt-2 text-[11px] text-slate-500">
-                ΓΡΑΜΜΕΣ: <span className="font-semibold">{allocStats.totalLines}</span> •
-                QTY: <span className="font-semibold">{allocStats.totalQty}</span> •
-                ASSIGNED: <span className="font-semibold">{allocStats.assigned}</span>
+                ΓΡΑΜΜΕΣ: <span className="font-semibold">{allocStats.totalLines}</span> • QTY:{" "}
+                <span className="font-semibold">{allocStats.totalQty}</span> • ASSIGNED:{" "}
+                <span className="font-semibold">{allocStats.assigned}</span>
               </div>
             </div>
 
@@ -636,9 +632,7 @@ export default function AdminParticipantDetail() {
             {allocLoading ? (
               <div className="p-3 text-[11px] text-slate-600">ΦΟΡΤΩΣΗ…</div>
             ) : allocError ? (
-              <div className="p-3 text-[11px] text-rose-700 bg-rose-50">
-                {allocError}
-              </div>
+              <div className="p-3 text-[11px] text-rose-700 bg-rose-50">{allocError}</div>
             ) : allocations.length === 0 ? (
               <div className="p-3 text-[11px] text-slate-500 bg-white">
                 ΔΕΝ ΥΠΑΡΧΟΥΝ ALLOCATIONS ΓΙΑ ΤΟΝ ΣΥΜΜΕΤΕΧΟΝΤΑ.
@@ -660,9 +654,7 @@ export default function AdminParticipantDetail() {
                     >
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
-                          <div className="text-[11px] font-mono text-slate-700">
-                            {code}
-                          </div>
+                          <div className="text-[11px] font-mono text-slate-700">{code}</div>
                           <div className="text-[12px] font-semibold text-slate-900 truncate">
                             {name}
                           </div>
@@ -785,9 +777,7 @@ function AddAllocationModal({ open, onClose, participantId, tripId, reloadAlloca
 
     setSaving(true);
     try {
-      const { error } = await supabase
-        .from("inventory_allocations")
-        .insert([payload]);
+      const { error } = await supabase.from("inventory_allocations").insert([payload]);
 
       if (error) throw error;
 
@@ -813,9 +803,7 @@ function AddAllocationModal({ open, onClose, participantId, tripId, reloadAlloca
       />
       <div className="absolute left-1/2 top-1/2 w-[92vw] max-w-xl -translate-x-1/2 -translate-y-1/2 bg-white rounded-2xl shadow-2xl border border-slate-200">
         <div className="h-12 px-4 border-b border-slate-200 flex items-center justify-between">
-          <div className="text-xs font-extrabold text-slate-900">
-            ΝΕΑ ΑΝΑΘΕΣΗ ΕΞΟΠΛΙΣΜΟΥ
-          </div>
+          <div className="text-xs font-extrabold text-slate-900">ΝΕΑ ΑΝΑΘΕΣΗ ΕΞΟΠΛΙΣΜΟΥ</div>
           <button
             type="button"
             onClick={onClose}
@@ -856,9 +844,7 @@ function AddAllocationModal({ open, onClose, participantId, tripId, reloadAlloca
 
           <div className="grid grid-cols-3 gap-2">
             <div>
-              <label className="block text-[10px] font-extrabold text-slate-700 mb-1">
-                QTY
-              </label>
+              <label className="block text-[10px] font-extrabold text-slate-700 mb-1">QTY</label>
               <input
                 type="number"
                 min="1"
